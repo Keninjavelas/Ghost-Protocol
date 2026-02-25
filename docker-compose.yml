@@ -1,0 +1,73 @@
+version: "3.9"
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: ghost_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ghost}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ghostpass}
+      POSTGRES_DB: ${POSTGRES_DB:-ghost_db}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ghost}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: ghost_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Ghost Protocol App ──────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ghost_app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-ghost}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ghostpass}
+      POSTGRES_DB: ${POSTGRES_DB:-ghost_db}
+      REDIS_HOST: redis
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+      SSH_HOST: 0.0.0.0
+      SSH_PORT: 2222
+      DASHBOARD_PORT: 8000
+      LOG_JSON: "true"
+    ports:
+      - "2222:2222"   # SSH honeypot
+      - "8000:8000"   # Dashboard API
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # Docker-in-Docker for sandboxes
+      - ./config/ssh_host_rsa_key:/app/config/ssh_host_rsa_key:ro
+    cap_add:
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres_data:

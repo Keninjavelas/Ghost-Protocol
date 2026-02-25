@@ -1,0 +1,932 @@
+
+# 🧠 AI DECEPTION & ATTRIBUTION ENGINE
+
+## Stage 2 – Technical Module Interaction Diagram
+
+---
+
+# 🔷 1. HIGH-LEVEL SYSTEM FLOW
+
+```
+Attacker
+   │
+   ▼
+[1] SSH Gateway (Paramiko / AsyncSSH)
+   │
+   ▼
+[2] Session Manager
+   │
+   ├──> [3] Sandbox Orchestrator (Docker)
+   │
+   ▼
+[4] Command Interceptor
+   │
+   ▼
+[5] AI Reasoning Core
+        │
+        ├──> Intent Inference Engine
+        ├──> Environment Shaping Engine
+        ├──> MITRE Mapping Engine
+        ├──> Threat Scoring Engine
+        └──> Report Generator
+   │
+   ▼
+[6] Response Renderer (Terminal Output)
+   │
+   ▼
+Attacker Sees Output
+```
+
+Parallel pipelines:
+
+```
+AI Reasoning Core
+   │
+   ├──> [7] Telemetry Logger → Database
+   ├──> [8] Beacon/Canary Manager
+   └──> [9] Dashboard API Backend → Frontend
+```
+
+---
+
+# 🔷 2. DETAILED MODULE BREAKDOWN
+
+---
+
+# [1] SSH GATEWAY MODULE
+
+### Responsibilities:
+
+* Accept inbound connections
+* Fake authentication success
+* Capture metadata
+* Create session_id
+
+### Outputs:
+
+```
+{
+  session_id,
+  source_ip,
+  username,
+  timestamp
+}
+```
+
+### Sends To:
+
+→ Session Manager
+
+---
+
+# [2] SESSION MANAGER
+
+### Responsibilities:
+
+* Maintain active sessions
+* Store session memory reference
+* Allocate sandbox
+* Initialize AI context memory
+
+### Internal State:
+
+```
+Session {
+   session_id
+   container_id
+   working_directory
+   ai_memory_state
+   threat_profile
+}
+```
+
+### Sends To:
+
+→ Sandbox Orchestrator
+→ AI Reasoning Core (initialize memory)
+
+---
+
+# [3] SANDBOX ORCHESTRATOR
+
+### Responsibilities:
+
+* Spawn Docker container
+* Apply:
+
+  * CPU limit
+  * Memory limit
+  * No outbound networking
+* Auto-destroy on session end
+
+### Returns:
+
+```
+container_id
+```
+
+### Sends To:
+
+→ Session Manager
+
+---
+
+# [4] COMMAND INTERCEPTOR
+
+### Responsibilities:
+
+* Capture every terminal command
+* Timestamp it
+* Send command to AI Reasoning Core
+* Never directly execute on host
+
+### Data Sent:
+
+```
+{
+  session_id,
+  command,
+  timestamp
+}
+```
+
+---
+
+# 🔷 3. AI REASONING CORE (CENTRAL BRAIN)
+
+This is the most important component.
+
+Internally divided into submodules:
+
+```
+AI Reasoning Core
+    ├── A. Intent Inference Engine
+    ├── B. Environment Shaping Engine
+    ├── C. Command Response Generator
+    ├── D. MITRE Mapping Engine
+    ├── E. Threat Scoring Engine
+    └── F. Report Generator
+```
+
+---
+
+## A. INTENT INFERENCE ENGINE
+
+### Input:
+
+* Recent command history
+* Command timing
+* Classification tags
+
+### Output:
+
+```
+{
+  attacker_type,
+  primary_objective,
+  sophistication_level,
+  confidence_score
+}
+```
+
+### Sends To:
+
+→ Environment Shaping Engine
+→ Threat Scoring Engine
+→ Dashboard
+
+---
+
+## B. ENVIRONMENT SHAPING ENGINE
+
+### Purpose:
+
+Dynamically modifies visible filesystem illusion.
+
+### Input:
+
+* Inferred attacker intent
+* Current directory
+* Behavioral profile
+
+### Output:
+
+* Fake directories injected
+* Sensitive files generated
+* Targeted traps placed
+
+### Sends To:
+
+→ Command Response Generator
+
+---
+
+## C. COMMAND RESPONSE GENERATOR
+
+### Responsibilities:
+
+* Generate terminal output
+* Maintain filesystem consistency
+* Stream output realistically
+
+### Input:
+
+* Command
+* Session state
+* Shaped environment context
+
+### Output:
+
+Terminal string response
+
+### Sends To:
+
+→ Response Renderer
+
+---
+
+## D. MITRE MAPPING ENGINE
+
+### Input:
+
+* Command semantics
+* Behavioral signals
+
+### Output:
+
+```
+{
+  tactics_detected,
+  techniques,
+  confidence
+}
+```
+
+### Sends To:
+
+→ Threat Scoring Engine
+→ Dashboard
+
+---
+
+## E. THREAT SCORING ENGINE
+
+### Input:
+
+* Intent inference output
+* MITRE mapping
+* Behavioral telemetry
+
+### Output:
+
+```
+{
+  risk_score,
+  threat_level,
+  attacker_category,
+  likelihood_APT
+}
+```
+
+### Sends To:
+
+→ Dashboard
+→ Report Generator
+
+---
+
+## F. REPORT GENERATOR
+
+Triggered on:
+
+* Session termination
+* Timeout
+
+### Output:
+
+Structured intelligence report:
+
+```
+{
+  executive_summary,
+  techniques_used,
+  intent_analysis,
+  threat_score,
+  mitigation_suggestions
+}
+```
+
+Stored in database.
+
+---
+
+# 🔷 4. TELEMETRY LOGGER
+
+Parallel process.
+
+### Captures:
+
+* Every command
+* AI classification
+* MITRE mapping
+* Threat score updates
+* Beacon trigger events
+
+### Stores In:
+
+* PostgreSQL (structured)
+* JSON logs
+
+---
+
+# 🔷 5. BEACON / CANARY MANAGER
+
+### Triggered When:
+
+Sensitive file generated.
+
+### Responsibilities:
+
+* Create Canary token
+* Embed tracking URL
+* Associate token with session_id
+
+### If Triggered:
+
+```
+{
+  triggered_ip,
+  timestamp,
+  session_id
+}
+```
+
+Sends alert to dashboard.
+
+---
+
+# 🔷 6. DASHBOARD BACKEND (FastAPI)
+
+### Pulls From:
+
+* Database
+* Live session memory
+
+### Exposes Endpoints:
+
+```
+GET /sessions
+GET /session/{id}
+GET /mitre/{id}
+GET /threat-score/{id}
+GET /beacon-events
+GET /report/{id}
+```
+
+---
+
+# 🔷 7. DASHBOARD FRONTEND
+
+Real-time panels:
+
+1. Live Terminal Replay
+2. AI Intent Classification
+3. Threat Score Gauge
+4. MITRE Heatmap
+5. Beacon Alerts
+6. Final Intelligence Report
+
+---
+
+# 🔷 8. COMPLETE REAL-TIME DATA FLOW
+
+```
+Attacker Command
+     ↓
+Command Interceptor
+     ↓
+AI Reasoning Core
+     ├── Intent Inference
+     ├── Environment Shaping
+     ├── MITRE Mapping
+     ├── Threat Scoring
+     └── Response Generation
+     ↓
+Response Renderer → Attacker
+
+Parallel:
+AI → Telemetry Logger → Database → Dashboard
+AI → Beacon Manager → Alert → Dashboard
+```
+
+---
+
+# 🔷 9. CONCURRENCY MODEL
+
+Each session runs:
+
+* Independent Docker container
+* Independent AI memory context
+* Independent telemetry record
+* Independent threat score
+
+Use:
+
+* Async event loop
+* Thread-safe session store
+* Redis for session state caching
+
+---
+
+# 🔷 10. TERMINATION FLOW
+
+On:
+
+* Disconnect
+* Timeout
+
+System executes:
+
+1. Final AI Report Generation
+2. Persist report
+3. Destroy Docker container
+4. Mark session closed
+5. Update dashboard
+
+---
+
+# 🧠 WHY THIS IS TRUE STAGE 2
+
+Because:
+
+* AI is central to every decision
+* AI performs behavioral reasoning
+* AI maps tactics semantically
+* AI generates intelligence
+* AI adapts deception environment
+
+This is not a static honeypot.
+
+This is an autonomous AI cyber analyst.
+
+---
+
+# AI DECEPTION & AUTONOMOUS ATTRIBUTION ENGINE
+
+## Stage 2 – Full Implementation Specification
+
+Version: 1.0
+Scope: AI-Centric Prototype (Pilot Deployable)
+
+---
+
+# 1. PROJECT EXPLANATION
+
+## 1.1 Problem Statement
+
+Traditional cybersecurity systems are reactive. Attackers breach networks and remain undetected for long periods. Static honeypots collect limited intelligence and do not adapt to attacker behavior.
+
+## 1.2 Proposed Solution
+
+Build an **Autonomous AI Deception & Attribution Engine** that:
+
+1. Engages attackers in real time via SSH.
+2. Dynamically adapts the fake environment based on attacker behavior.
+3. Uses AI to infer attacker intent and sophistication.
+4. Maps behavior to MITRE ATT&CK techniques.
+5. Generates autonomous threat intelligence reports.
+6. Provides a live SOC dashboard.
+
+The AI is not just generating terminal text.
+It is acting as:
+
+* A deception orchestrator
+* A behavioral analyst
+* An attribution engine
+* An automated SOC assistant
+
+---
+
+# 2. SYSTEM PHILOSOPHY
+
+This system must:
+
+* Never expose the real host environment.
+* Treat each attacker as an independent session.
+* Use AI reasoning to adapt dynamically.
+* Log everything in structured form.
+* Generate intelligence, not just fake files.
+
+---
+
+# 3. HIGH-LEVEL ARCHITECTURE
+
+```
+Attacker
+   ↓
+SSH Gateway
+   ↓
+Session Manager
+   ↓
+Sandbox Orchestrator (Docker)
+   ↓
+Command Interceptor
+   ↓
+AI Reasoning Core
+   ├── Intent Inference
+   ├── Environment Shaping
+   ├── MITRE Mapping
+   ├── Threat Scoring
+   └── Report Generation
+   ↓
+Response Renderer → Attacker
+
+Parallel:
+AI → Telemetry Logger → Database → Dashboard
+AI → Beacon Manager → Alert → Dashboard
+```
+
+---
+
+# 4. FOLDER STRUCTURE
+
+```
+ai-deception-engine/
+│
+├── gateway/
+│   ├── ssh_server.py
+│   ├── auth_handler.py
+│
+├── session/
+│   ├── session_manager.py
+│   ├── session_model.py
+│
+├── sandbox/
+│   ├── docker_manager.py
+│   ├── container_templates/
+│
+├── interception/
+│   ├── command_interceptor.py
+│
+├── ai_core/
+│   ├── llm_client.py
+│   ├── intent_inference.py
+│   ├── environment_shaper.py
+│   ├── response_generator.py
+│   ├── mitre_mapper.py
+│   ├── threat_scorer.py
+│   ├── report_generator.py
+│
+├── tracking/
+│   ├── canary_manager.py
+│   ├── beacon_listener.py
+│
+├── telemetry/
+│   ├── logger.py
+│
+├── database/
+│   ├── models.py
+│   ├── db.py
+│
+├── dashboard/
+│   ├── backend/
+│   │   ├── main.py
+│   │   ├── routes.py
+│   ├── frontend/
+│
+├── config/
+│   ├── settings.py
+│
+├── docker-compose.yml
+├── requirements.txt
+└── README.md
+```
+
+---
+
+# 5. MODULE RESPONSIBILITIES
+
+---
+
+# 5.1 gateway/
+
+### ssh_server.py
+
+* Accept inbound SSH connections.
+* Fake authentication.
+* Generate session_id.
+* Forward session to Session Manager.
+
+---
+
+# 5.2 session/
+
+### session_manager.py
+
+* Maintain active sessions dictionary.
+* Initialize AI memory context.
+* Link container_id to session_id.
+* Handle session cleanup.
+
+Session Object:
+
+```
+Session:
+    session_id
+    source_ip
+    container_id
+    working_directory
+    command_history
+    ai_profile
+    threat_score
+```
+
+---
+
+# 5.3 sandbox/
+
+### docker_manager.py
+
+* Spawn isolated container per session.
+* Apply CPU/memory limits.
+* Disable outbound networking.
+* Destroy container on termination.
+
+---
+
+# 5.4 interception/
+
+### command_interceptor.py
+
+* Capture every terminal command.
+* Timestamp.
+* Send to AI Core.
+* Return AI-generated response to attacker.
+
+---
+
+# 5.5 ai_core/
+
+This is the brain of the system.
+
+---
+
+## llm_client.py
+
+* Handles communication with LLM API.
+* Maintains per-session memory context.
+
+---
+
+## intent_inference.py
+
+Input:
+
+* Last N commands
+* Command timing
+* Classification tags
+
+Output:
+
+```
+{
+  attacker_type,
+  primary_objective,
+  sophistication_level,
+  confidence
+}
+```
+
+---
+
+## environment_shaper.py
+
+* Modifies visible filesystem.
+* Injects relevant fake sensitive files.
+* Keeps environment consistent.
+
+---
+
+## response_generator.py
+
+* Generates realistic terminal outputs.
+* Ensures stateful directory tracking.
+* Streams responses.
+
+---
+
+## mitre_mapper.py
+
+* Maps command semantics to MITRE ATT&CK.
+* Returns:
+
+```
+{
+  tactics_detected,
+  techniques,
+  confidence
+}
+```
+
+---
+
+## threat_scorer.py
+
+Aggregates:
+
+* Intent inference
+* MITRE mapping
+* Behavioral telemetry
+
+Outputs:
+
+```
+{
+  risk_score,
+  threat_level,
+  attacker_category,
+  likelihood_APT
+}
+```
+
+---
+
+## report_generator.py
+
+On session end:
+
+Generates:
+
+* Executive summary
+* Observed techniques
+* Risk classification
+* Suggested mitigations
+
+Stored in database.
+
+---
+
+# 5.6 tracking/
+
+### canary_manager.py
+
+* Generate tracking tokens.
+* Embed into sensitive files.
+
+### beacon_listener.py
+
+* Listen for token callbacks.
+* Log triggered events.
+
+---
+
+# 5.7 telemetry/
+
+### logger.py
+
+Logs:
+
+* Commands
+* AI classification
+* MITRE mapping
+* Threat score updates
+* Beacon events
+
+---
+
+# 5.8 database/
+
+Tables:
+
+### sessions
+
+* session_id
+* source_ip
+* start_time
+* end_time
+* threat_level
+
+### commands
+
+* session_id
+* command
+* timestamp
+
+### mitre_mappings
+
+* session_id
+* technique_id
+* tactic
+
+### beacon_events
+
+* session_id
+* token_id
+* triggered_ip
+* triggered_time
+
+### reports
+
+* session_id
+* report_json
+
+---
+
+# 5.9 dashboard/
+
+Backend (FastAPI):
+
+Endpoints:
+
+* GET /sessions
+* GET /session/{id}
+* GET /mitre/{id}
+* GET /threat/{id}
+* GET /beacons
+* GET /report/{id}
+
+Frontend displays:
+
+* Live terminal replay
+* Intent classification panel
+* Threat score gauge
+* MITRE heatmap
+* Beacon alerts
+* Intelligence report
+
+---
+
+# 6. COMPLETE RUNTIME FLOW
+
+1. Attacker connects via SSH.
+2. Session created.
+3. Docker sandbox spawned.
+4. Command intercepted.
+5. AI Reasoning Core processes:
+
+   * Intent inference
+   * Environment shaping
+   * MITRE mapping
+   * Threat scoring
+   * Response generation
+6. Response returned to attacker.
+7. Telemetry logged.
+8. Dashboard updated in real-time.
+9. On session end:
+
+   * AI report generated
+   * Container destroyed
+   * Session archived
+
+---
+
+# 7. CONCURRENCY MODEL
+
+* Async SSH server
+* One Docker container per session
+* Independent AI memory per session
+* Thread-safe session store
+* Redis optional for caching
+
+---
+
+# 8. SECURITY CONSTRAINTS
+
+* No real command execution on host.
+* Containers run as non-root.
+* No outbound internet from sandbox.
+* API keys stored securely.
+* Logs encrypted.
+
+---
+
+# 9. DEFINITION OF DONE (STAGE 2)
+
+The project is considered complete when:
+
+* Multiple attackers can connect simultaneously.
+* AI dynamically classifies attacker intent.
+* AI modifies environment based on behavior.
+* MITRE ATT&CK techniques are automatically generated.
+* Threat score updates in real time.
+* Canary token triggers appear on dashboard.
+* Final intelligence report auto-generated per session.
+* All containers destroyed on termination.
+
+---
+
+# 10. WHAT THIS SYSTEM IS
+
+It is:
+
+* An AI-driven adaptive deception engine.
+* An autonomous cyber behavioral analyst.
+* A real-time attribution prototype.
+* A SOC intelligence assistant.
+
+It is NOT:
+
+* A static honeypot.
+* A fake terminal generator.
+* A production enterprise security platform (Stage 3).
+

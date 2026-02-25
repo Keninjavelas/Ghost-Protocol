@@ -1,0 +1,39 @@
+# Core async SSH
+asyncssh==2.14.2
+paramiko==3.4.0
+
+# AI / LLM
+openai==1.30.1
+tiktoken==0.7.0
+
+# Web Framework (Dashboard)
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+
+# Database
+sqlalchemy==2.0.30
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+alembic==1.13.1
+
+# Redis (session cache)
+redis==5.0.4
+aioredis==2.0.1
+
+# Docker SDK
+docker==7.1.0
+
+# HTTP client (beacon listener)
+httpx==0.27.0
+
+# Utilities
+pydantic==2.7.1
+pydantic-settings==2.2.1
+python-dotenv==1.0.1
+structlog==24.2.0
+orjson==3.10.3
+uuid6==2024.1.12
+python-ulid==2.7.0
+
+# Security
+cryptography==42.0.7

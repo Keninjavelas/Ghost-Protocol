@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ghost Protocol – AI Cyber Defense Console</title>
+  <meta name="description" content="Real-time AI Cyber Defense Command Center for Ghost Protocol Stage 2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<!-- ═══════════════════  HEADER  ═══════════════════ -->
+<header class="header">
+  <div class="header-left">
+    <span class="logo">⬡ GHOST PROTOCOL</span>
+    <span class="version">Stage II · AI Deception Engine</span>
+  </div>
+
+  <div class="header-center">
+    <label class="session-label" for="session-select">SESSION</label>
+    <select id="session-select">
+      <option value="">— Awaiting Connection —</option>
+    </select>
+    <span id="session-count" class="session-pill">0 active</span>
+  </div>
+
+  <div class="header-right">
+    <span id="live-indicator" class="live-indicator offline">
+      <span class="live-dot"></span>
+      <span id="live-text">OFFLINE</span>
+    </span>
+    <span id="clock" class="clock">--:--:--</span>
+  </div>
+</header>
+
+<!-- ═══════════════════  DASHBOARD GRID  ═══════════════════ -->
+<main class="dashboard">
+
+  <!-- LEFT: Terminal -->
+  <section class="panel panel-terminal" id="panel-terminal">
+    <div class="panel-header">
+      <span class="panel-title">ATTACKER TERMINAL</span>
+      <span class="panel-badge" id="cmd-count">0 cmds</span>
+    </div>
+    <div class="terminal-body" id="terminal-output">
+      <div class="empty-state">Waiting for attacker session…</div>
+    </div>
+  </section>
+
+  <!-- RIGHT: stacked panels -->
+  <div class="right-col">
+
+    <!-- TOP ROW: Intent + Gauge -->
+    <div class="right-top">
+
+      <!-- Intent Card -->
+      <section class="panel panel-intent">
+        <div class="panel-header">
+          <span class="panel-title">AI INTENT ANALYSIS</span>
+          <span class="panel-badge" id="intent-conf-badge">—</span>
+        </div>
+        <div class="intent-body">
+          <div class="intent-row">
+            <span class="ilabel">ATTACKER TYPE</span>
+            <span class="ivalue" id="i-type">—</span>
+          </div>
+          <div class="intent-row">
+            <span class="ilabel">PRIMARY INTENT</span>
+            <span class="ivalue" id="i-intent">—</span>
+          </div>
+          <div class="intent-row">
+            <span class="ilabel">SOPHISTICATION</span>
+            <span class="ivalue" id="i-soph">—</span>
+          </div>
+          <div class="intent-row">
+            <span class="ilabel">CONFIDENCE</span>
+            <span class="ivalue" id="i-conf">—</span>
+          </div>
+          <div class="conf-bar-track">
+            <div class="conf-bar-fill" id="conf-bar"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Threat Gauge -->
+      <section class="panel panel-threat" id="panel-threat">
+        <div class="panel-header">
+          <span class="panel-title">THREAT LEVEL</span>
+          <span class="panel-badge threat-badge" id="threat-level-badge">LOW</span>
+        </div>
+        <div class="gauge-body">
+          <div class="gauge-score-row">
+            <span class="gauge-score" id="gauge-score">0.0</span>
+            <span class="gauge-denom">/ 10</span>
+          </div>
+          <div class="gauge-segments" id="gauge-segments"></div>
+          <div class="gauge-axis">
+            <span>LOW</span><span>MED</span><span>HIGH</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- MITRE HEATMAP -->
+    <section class="panel panel-mitre">
+      <div class="panel-header">
+        <span class="panel-title">MITRE ATT&amp;CK HEATMAP</span>
+        <span class="panel-badge" id="mitre-count">0 techniques</span>
+      </div>
+      <div class="mitre-grid" id="mitre-grid"></div>
+    </section>
+
+  </div><!-- /right-col -->
+
+  <!-- BOTTOM-LEFT: Timeline -->
+  <section class="panel panel-timeline">
+    <div class="panel-header">
+      <span class="panel-title">ATTACK TIMELINE</span>
+      <button class="demo-btn" id="demo-btn" onclick="runDemo()">▶ DEMO MODE</button>
+    </div>
+    <div class="timeline-body" id="timeline-output">
+      <div class="empty-state">No events recorded.</div>
+    </div>
+  </section>
+
+  <!-- BOTTOM-RIGHT: Beacons -->
+  <section class="panel panel-beacon">
+    <div class="panel-header">
+      <span class="panel-title">BEACON ALERTS</span>
+      <span class="panel-badge danger-badge" id="beacon-count">0</span>
+    </div>
+    <div class="beacon-body" id="beacon-output">
+      <div class="empty-state">No canary triggers.</div>
+    </div>
+  </section>
+
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
