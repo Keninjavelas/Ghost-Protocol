@@ -68,11 +68,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _docker_mgr = DockerManager()
     _telemetry = TelemetryLogger()
     _canary_mgr = CanaryManager()
-    _session_mgr = SessionManager(docker_manager=_docker_mgr)
     _ws_manager = ConnectionManager()
 
     # Wire up AI core
     llm = LLMClient()
+    report_gen = ReportGenerator(llm)
+    
+    _session_mgr = SessionManager(
+        docker_manager=_docker_mgr,
+        report_generator=report_gen,
+        ws_manager=_ws_manager,
+    )
+    
     interceptor = CommandInterceptor(
         session_manager=_session_mgr,
         llm_client=llm,
@@ -81,8 +88,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         mitre_mapper=MitreMapper(llm),
         threat_scorer=ThreatScorer(),
         response_generator=ResponseGenerator(llm),
-        report_generator=ReportGenerator(llm),
+        report_generator=report_gen,
         telemetry=_telemetry,
+        ws_manager=_ws_manager,
     )
 
     # Attach services to app state

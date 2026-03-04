@@ -8,14 +8,18 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import TYPE_CHECKING, Dict, Optional
 
 import structlog
 
 from database.db import get_session
-from database.models import Session as DBSession
+from database.models import Session as DBSession, Report as DBReport
 from sandbox.docker_manager import DockerManager
 from session.session_model import SessionState
+
+if TYPE_CHECKING:
+    from ai_core.report_generator import ReportGenerator
+    from dashboard.backend.websocket import ConnectionManager
 
 log = structlog.get_logger(__name__)
 
@@ -23,10 +27,17 @@ log = structlog.get_logger(__name__)
 class SessionManager:
     """Singleton-like manager; create one instance and share it."""
 
-    def __init__(self, docker_manager: DockerManager) -> None:
+    def __init__(
+        self,
+        docker_manager: DockerManager,
+        report_generator: Optional["ReportGenerator"] = None,
+        ws_manager: Optional["ConnectionManager"] = None,
+    ) -> None:
         self._sessions: Dict[uuid.UUID, SessionState] = {}
         self._lock = asyncio.Lock()
         self._docker = docker_manager
+        self._report_gen = report_generator
+        self._ws = ws_manager
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -47,6 +58,24 @@ class SessionManager:
             source_ip=source_ip,
             username=username,
             start_time=now,
+        )
+
+        # ── Preload Credential Theft Trap Bait Files ──────────────────────────
+        # Guarantee high-value targets appear in every session for demo
+        from ai_core.bait_files import get_all_bait_files
+        
+        bait_files = get_all_bait_files()
+        for file_path, metadata in bait_files.items():
+            state.fake_fs[file_path] = {
+                "content_hint": metadata.get("content_hint", ""),
+                "is_bait": metadata.get("is_bait", False),
+                "is_sensitive": metadata.get("is_sensitive", False),
+            }
+        
+        log.info(
+            "bait_files_preloaded",
+            session_id=str(session_id),
+            bait_count=len(bait_files),
         )
 
         # Persist to DB
@@ -160,6 +189,35 @@ class SessionManager:
         if state is None:
             return
 
+        # ── Automatic Report Generation ────────────────────────────────────────
+        # Generate intelligence report before cleanup
+        report_data = None
+        if self._report_gen:
+            try:
+                report_data = await self._report_gen.generate(state)
+                
+                # Persist report to database
+                async with get_session() as db:
+                    db_report = DBReport(
+                        session_id=session_id,
+                        report_json=report_data,
+                    )
+                    db.add(db_report)
+                
+                log.info("report_persisted", session_id=str(session_id))
+                
+                # ── WebSocket Event: report_generated ──────────────────────────
+                if self._ws:
+                    await self._ws.broadcast(
+                        self._ws.make_event(
+                            "report_generated",
+                            str(session_id),
+                            {"report": report_data},
+                        )
+                    )
+            except Exception as exc:
+                log.warning("report_generation_failed", session_id=str(session_id), error=str(exc))
+
         # Destroy Docker container
         if state.container_id:
             try:
@@ -174,5 +232,21 @@ class SessionManager:
             if db_obj:
                 db_obj.status = "closed"
                 db_obj.end_time = datetime.now(timezone.utc)
+        
+        # ── WebSocket Event: session_closed ────────────────────────────────────
+        if self._ws:
+            await self._ws.broadcast(
+                self._ws.make_event(
+                    "session_closed",
+                    str(session_id),
+                    {
+                        "session_id": str(session_id),
+                        "duration": int((datetime.now(timezone.utc) - state.start_time).total_seconds()),
+                        "command_count": len(state.command_history),
+                        "threat_level": state.threat_level,
+                        "risk_score": state.risk_score,
+                    },
+                )
+            )
 
         log.info("session_closed", session_id=str(session_id))

@@ -168,6 +168,44 @@ class TelemetryLogger:
                 )
             )
 
+    # ── Credential access logging ──────────────────────────────────────────────
+
+    async def log_credential_access(
+        self,
+        session_id: uuid.UUID,
+        file_path: str,
+        command: str,
+        mitre_technique: Optional[str] = None,
+    ) -> None:
+        """
+        Log when an attacker accesses a sensitive bait file containing credentials.
+        This is a high-severity security event for demo scenarios.
+        """
+        self._log.warning(
+            "credential_theft_detected",
+            session_id=str(session_id),
+            file=file_path,
+            command=command,
+            mitre_technique=mitre_technique,
+            severity="HIGH",
+        )
+        # Note: We log to MITRE mappings table since we're tracking techniques
+        if mitre_technique:
+            from database.db import get_session
+            from database.models import MitreMapping
+            
+            async with get_session() as db:
+                db.add(
+                    MitreMapping(
+                        session_id=session_id,
+                        technique_id=mitre_technique,
+                        technique_name=f"Credential Access: {file_path}",
+                        tactic="Credential Access",
+                        confidence=1.0,  # Direct file access = 100% confidence
+                        timestamp=datetime.now(timezone.utc),
+                    )
+                )
+
     # ── Report logging ─────────────────────────────────────────────────────────
 
     async def log_report(

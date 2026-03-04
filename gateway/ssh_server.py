@@ -211,7 +211,6 @@ async def main() -> None:
     await init_db()
 
     docker_mgr = DockerManager()
-    session_mgr = SessionManager(docker_manager=docker_mgr)
     telemetry = TelemetryLogger()
 
     from ai_core.llm_client import LLMClient
@@ -223,6 +222,15 @@ async def main() -> None:
     from ai_core.report_generator import ReportGenerator
 
     llm = LLMClient()
+    report_gen = ReportGenerator(llm)
+    
+    # SSH server runs standalone without WebSocket
+    session_mgr = SessionManager(
+        docker_manager=docker_mgr,
+        report_generator=report_gen,
+        ws_manager=None,
+    )
+    
     interceptor = CommandInterceptor(
         session_manager=session_mgr,
         llm_client=llm,
@@ -231,8 +239,9 @@ async def main() -> None:
         mitre_mapper=MitreMapper(llm),
         threat_scorer=ThreatScorer(),
         response_generator=ResponseGenerator(llm),
-        report_generator=ReportGenerator(llm),
+        report_generator=report_gen,
         telemetry=telemetry,
+        ws_manager=None,  # SSH server runs standalone without WebSocket
     )
 
     def server_factory() -> GhostSSHServer:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any, Optional
 
 import structlog
@@ -71,6 +72,9 @@ class LLMClient:
         Send a conversation to the local LLM and return parsed JSON.
         `messages` must include the system prompt as the first message.
         """
+        # ── LLM Latency Instrumentation ────────────────────────────────────────
+        start = time.monotonic()
+        
         response = await self._client.chat.completions.create(
             model=settings.OLLAMA_MODEL,
             messages=messages,  # type: ignore[arg-type]
@@ -78,6 +82,10 @@ class LLMClient:
             temperature=temperature if temperature is not None else settings.LLM_TEMPERATURE,
             # response_format is intentionally omitted – not universally supported by Ollama models
         )
+        
+        duration = time.monotonic() - start
+        log.info("llm_call_duration", duration_seconds=round(duration, 3), model=settings.OLLAMA_MODEL)
+        
         raw = response.choices[0].message.content or "{}"
         if json_mode:
             raw = _extract_json(raw)

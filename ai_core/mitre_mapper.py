@@ -22,6 +22,7 @@ from typing import Any
 import structlog
 
 from ai_core.llm_client import LLMClient
+from ai_core.mitre_registry import filter_techniques
 
 log = structlog.get_logger(__name__)
 
@@ -79,12 +80,21 @@ class MitreMapper:
 
         try:
             result = await self._llm.chat(messages, json_mode=True)
-            techniques = result.get("techniques", [])
+            
+            # ── MITRE Technique Validation ─────────────────────────────────────
+            # Filter out hallucinated technique IDs using the canonical registry
+            raw_techniques = result.get("techniques", [])
+            validated_techniques = filter_techniques(raw_techniques)
+            
+            # Update result with validated techniques only
+            result["techniques"] = validated_techniques
+            
             log.info(
                 "mitre_mapped",
                 command=command[:60],
-                technique_count=len(techniques),
-                top_technique=techniques[0].get("id") if techniques else "none",
+                raw_count=len(raw_techniques),
+                validated_count=len(validated_techniques),
+                top_technique=validated_techniques[0].get("id") if validated_techniques else "none",
             )
             return result
         except Exception as exc:

@@ -58,6 +58,7 @@ class ThreatScorer:
         intent: dict[str, Any],
         mitre_result: dict[str, Any],
         command_count: int = 0,
+        credential_access_count: int = 0,
     ) -> dict[str, Any]:
         """Compute and return a threat score dict."""
 
@@ -86,6 +87,39 @@ class ThreatScorer:
             + mitre_w * 25
             + cmd_w * 10
         ) * confidence
+        
+        # ── Threat Score Escalation ────────────────────────────────────────────
+        # Apply multipliers based on specific risk indicators
+        
+        multiplier = 1.0
+        
+        # Escalation rule 1: Multiple MITRE techniques detected
+        if len(techniques) >= 3:
+            multiplier *= 1.3
+            log.debug("threat_escalation_applied", reason="multiple_techniques", count=len(techniques))
+        
+        # Escalation rule 2: Nation-state level sophistication
+        if sophistication == "nation-state":
+            multiplier *= 1.5
+            log.debug("threat_escalation_applied", reason="nation_state_sophistication")
+        
+        # Escalation rule 3: High confidence intent
+        if confidence > 0.8:
+            multiplier *= 1.2
+            log.debug("threat_escalation_applied", reason="high_confidence", confidence=confidence)
+        
+        # ── Credential Theft Escalation ────────────────────────────────────────
+        # Significant penalty for accessing sensitive credential files
+        if credential_access_count > 0:
+            raw += (25 * credential_access_count)  # +25 per credential file accessed
+            log.warning(
+                "threat_escalation_credential_theft",
+                credential_files_accessed=credential_access_count,
+                bonus_score=25 * credential_access_count,
+            )
+        
+        # Apply multiplier and clamp to 100
+        raw = raw * multiplier
         risk_score = round(min(raw, 100.0), 2)
 
         # Threat level buckets

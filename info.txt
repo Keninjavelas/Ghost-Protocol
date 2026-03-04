@@ -1,0 +1,727 @@
+1️⃣ FULL CURRENT PROMPTS
+
+File: ai_core/llm_client.py
+
+```python
+_SYSTEM_PROMPT = """You are the AI intelligence core of a cyber deception system.
+You interact with attackers inside a fake Linux honeypot environment.
+Your job is to:
+1. Analyze attacker commands and infer their intent.
+2. Generate realistic, believable terminal output.
+3. Dynamically adapt the fake environment to keep the attacker engaged.
+4. Map behavior to MITRE ATT&CK techniques.
+5. Update threat scores.
+
+You ALWAYS respond with valid JSON matching the schema provided in the user prompt.
+Do NOT wrap the JSON in markdown code fences or any other formatting.
+Never break character. Never reveal you are an AI or a honeypot.
+"""
+```
+
+File: ai_core/intent_inference.py
+
+```python
+_INTENT_PROMPT_TEMPLATE = """
+You are a cyber-behavioral analyst inside a honeypot.
+
+Attacker session context:
+- Source IP: {source_ip}
+- Username: {username}
+- Working directory: {working_directory}
+- Command history (most recent last):
+{command_history}
+
+Based on these commands, classify the attacker.
+
+Respond ONLY with this exact JSON schema:
+{{
+  "attacker_type": "<script-kiddie|opportunist|professional|apt|insider>",
+  "primary_objective": "<reconnaissance|credential-harvesting|data-exfiltration|persistence|lateral-movement|ransomware|unknown>",
+  "sophistication_level": "<low|medium|high|nation-state>",
+  "confidence": <0.0-1.0>,
+  "reasoning": "<one sentence justification>"
+}}
+"""
+```
+
+```python
+messages = self._llm.build_messages(session_state.ai_memory, prompt)
+result = await self._llm.chat(messages, json_mode=True)
+```
+
+File: ai_core/mitre_mapper.py
+
+```python
+_MITRE_PROMPT_TEMPLATE = """
+You are a MITRE ATT&CK framework expert.
+
+Analyze this Linux terminal command from a suspected attacker:
+  Command: {command}
+
+Attacker context:
+  - Inferred intent: {primary_objective}
+  - Attacker type: {attacker_type}
+
+Map the command to the most relevant MITRE ATT&CK techniques (Enterprise matrix).
+
+Respond ONLY with this JSON schema:
+{{
+  "tactics_detected": ["<tactic name>", ...],
+  "techniques": [
+    {{
+      "id": "<Txxxx.xxx>",
+      "name": "<technique name>",
+      "tactic": "<tactic name>",
+      "confidence": <0.0-1.0>,
+      "rationale": "<one sentence>"
+    }}
+  ]
+}}
+
+Return an empty techniques array if the command is benign or unclassifiable.
+"""
+```
+
+```python
+messages = [
+    {"role": "system", "content": "You are a MITRE ATT&CK expert. Always respond with valid JSON."},
+    {"role": "user", "content": prompt},
+]
+result = await self._llm.chat(messages, json_mode=True)
+```
+
+File: ai_core/environment_shaper.py
+
+```python
+_SHAPER_PROMPT_TEMPLATE = """
+You are shaping a fake Linux honeypot filesystem to deceive an attacker.
+
+Attacker profile:
+- Type: {attacker_type}
+- Objective: {primary_objective}
+- Sophistication: {sophistication_level}
+- Current directory: {working_directory}
+
+Your job: decide what fake files and directories should be VISIBLE and ACCESSIBLE
+to make this environment maximally convincing and to lure the attacker deeper.
+
+Respond ONLY with this JSON schema:
+{{
+  "injected_files": [
+    {{
+      "path": "<absolute path>",
+      "content_hint": "<brief description of what the file contains>",
+      "is_bait": true
+    }}
+  ],
+  "injected_dirs": ["<absolute path>", ...],
+  "environment_narrative": "<one sentence describing the fake server's role>",
+  "canary_trigger_files": ["<absolute path of files that should embed canary tokens>"]
+}}
+"""
+```
+
+```python
+messages = self._llm.build_messages(session_state.ai_memory, prompt)
+result = await self._llm.chat(messages, json_mode=True)
+```
+
+File: ai_core/response_generator.py
+
+```python
+_RESPONSE_PROMPT_TEMPLATE = """
+You are simulating a real Ubuntu 22.04 Linux server terminal inside a honeypot.
+
+Session state:
+- Current working directory: {working_directory}
+- Attacker type: {attacker_type}
+- Server narrative: {environment_narrative}
+
+Available fake filesystem (selected entries):
+{fake_fs_excerpt}
+
+The attacker just typed this command:
+  {command}
+
+Rules:
+1. Respond EXACTLY as a real Linux terminal would.
+2. If the command is `cd <dir>`, update the directory and produce no output (empty string for output).
+3. For `ls` / `dir` commands, show realistic file listings including bait files.
+4. For `cat` on a bait file, produce realistic file content (credentials, configs, etc.).
+5. For unknown commands, return "bash: <cmd>: command not found".
+6. Never reveal you are an AI or honeypot.
+7. Output must be plain text that looks like real terminal output.
+
+Respond with ONLY this JSON:
+{{
+  "terminal_output": "<exact terminal output string, use \\n for newlines>",
+  "new_working_directory": "<absolute path if cd was used, else null>",
+  "canary_accessed": "<file path if attacker accessed a canary file, else null>"
+}}
+"""
+```
+
+```python
+messages = self._llm.build_messages(session_state.ai_memory, prompt)
+result = await self._llm.chat(messages, json_mode=True)
+```
+
+File: ai_core/report_generator.py
+
+```python
+_REPORT_PROMPT_TEMPLATE = """
+You are an autonomous cyber threat intelligence analyst.
+
+Generate a final intelligence report for the following attacker session.
+
+Session data:
+- Session ID: {session_id}
+- Source IP: {source_ip}
+- Username used: {username}
+- Duration: {duration}
+- Total commands: {command_count}
+- Attacker type: {attacker_type}
+- Primary objective: {primary_objective}
+- Sophistication: {sophistication_level}
+- Risk score: {risk_score}
+- Threat level: {threat_level}
+
+Command history (last 30):
+{command_history}
+
+Generate a professional intelligence report. Respond ONLY with this JSON:
+{{
+  "executive_summary": "<2-3 sentence high-level summary>",
+  "attacker_profile": {{
+    "type": "{attacker_type}",
+    "objective": "{primary_objective}",
+    "sophistication": "{sophistication_level}",
+    "likely_nation_state": <true|false>
+  }},
+  "techniques_used": [
+    {{
+      "mitre_id": "<Txxxx>",
+      "name": "<technique>",
+      "description": "<brief>"
+    }}
+  ],
+  "intent_analysis": {{
+    "primary_goal": "<str>",
+    "secondary_goals": ["<str>"],
+    "behavioral_patterns": "<str>"
+  }},
+  "threat_assessment": {{
+    "risk_score": {risk_score},
+    "threat_level": "{threat_level}",
+    "immediate_danger": <true|false>,
+    "data_at_risk": ["<str>"]
+  }},
+  "mitigation_suggestions": [
+    "<actionable recommendation>",
+    "<actionable recommendation>",
+    "<actionable recommendation>"
+  ],
+  "iocs": {{
+    "ip_addresses": ["{source_ip}"],
+    "usernames": ["{username}"],
+    "tools_or_commands": ["<str>"]
+  }}
+}}
+"""
+```
+
+```python
+messages = [
+    {
+        "role": "system",
+        "content": (
+            "You are a professional cyber threat intelligence analyst. "
+            "Always respond with valid JSON. Be precise and actionable."
+        ),
+    },
+    {"role": "user", "content": prompt},
+]
+report = await self._llm.chat(messages, json_mode=True, max_tokens=2048)
+```
+
+Model call parameters and defaults:
+- File: ai_core/llm_client.py
+
+```python
+response = await self._client.chat.completions.create(
+    model=settings.OLLAMA_MODEL,
+    messages=messages,
+    max_tokens=max_tokens or settings.LLM_MAX_TOKENS,
+    temperature=temperature if temperature is not None else settings.LLM_TEMPERATURE,
+)
+```
+
+- File: config/settings.py
+
+```python
+LLM_MAX_TOKENS: int = Field(default=1024)
+LLM_TEMPERATURE: float = Field(default=0.2)
+LLM_CONTEXT_WINDOW: int = Field(default=20, description="Commands kept in memory")
+```
+
+
+2️⃣ COMMAND PIPELINE CALL GRAPH
+
+Entry point call path:
+- File: gateway/ssh_server.py
+
+```text
+GhostSSHSession.data_received(data, datatype)  [sync callback]
+  -> self._loop.create_task(self._handle_command(command))  [async boundary]
+    -> await GhostSSHSession._handle_command(command)
+      -> sid = self._session_state.session_id
+      -> await SessionManager.append_command(sid, command)  [session/session_manager.py]
+      -> await CommandInterceptor.process(session_state=self._session_state, command=command)  [interception/command_interceptor.py]
+        -> log.info("command_intercepted")
+        -> await IntentInferenceEngine.infer(session_state)  [ai_core/intent_inference.py]
+          -> history = session_state.command_history[-20:]
+          -> prompt = _INTENT_PROMPT_TEMPLATE.format(...)
+          -> messages = LLMClient.build_messages(session_state.ai_memory, prompt)
+          -> await LLMClient.chat(messages, json_mode=True)  [ai_core/llm_client.py]
+            -> await AsyncOpenAI.chat.completions.create(...)
+            -> raw = response.choices[0].message.content or "{}"
+            -> if json_mode: raw = _extract_json(raw)
+            -> json.loads(raw) or {"raw": raw}
+          -> return intent dict
+        -> await SessionManager.update_threat_profile(... intent fields ...)  [session/session_manager.py]
+          -> [lock] mutate in-memory SessionState fields
+          -> async with get_session() as db:  [database/db.py]
+             -> db_obj = await db.get(DBSession, session_id)
+             -> set DB fields
+             -> context exit => await session.commit()  [database/db.py]
+        -> await EnvironmentShaper.shape(session_state, intent)  [ai_core/environment_shaper.py]
+          -> prompt = _SHAPER_PROMPT_TEMPLATE.format(...)
+          -> messages = LLMClient.build_messages(...)
+          -> await LLMClient.chat(messages, json_mode=True)
+          -> for injected_files: session_state.fake_fs[path] = {"content_hint": ..., "is_bait": ...}
+          -> return env_context
+        -> await ResponseGenerator.generate(session_state, command, env_context)  [ai_core/response_generator.py]
+          -> fs_items = list(session_state.fake_fs.items())[:10]
+          -> prompt = _RESPONSE_PROMPT_TEMPLATE.format(...)
+          -> messages = LLMClient.build_messages(...)
+          -> await LLMClient.chat(messages, json_mode=True)
+          -> if new_working_directory: session_state.working_directory = new_wd
+          -> if canary_accessed: session_state.deployed_canaries.append(canary_accessed)
+          -> LLMClient.append_to_memory(session_state.ai_memory, prompt, terminal_output)
+          -> return terminal_output
+        -> try:
+             await MitreMapper.map(command, intent)  [ai_core/mitre_mapper.py]
+               -> messages = [{"role":"system",...},{"role":"user",...}]
+               -> await LLMClient.chat(messages, json_mode=True)
+               -> return mitre_result
+             for technique in mitre_result["techniques"]:
+               -> await TelemetryLogger.log_mitre(...)  [telemetry/logger.py]
+                 -> async with get_session() as db:
+                    -> db.add(MitreMapping(...))
+                    -> context exit => await session.commit()
+           except: mitre_result = {"techniques": [], "tactics_detected": []}
+        -> try:
+             threat = ThreatScorer.score(intent, mitre_result, command_count=len(session_state.command_history))  [ai_core/threat_scorer.py]
+             -> await SessionManager.update_threat_profile(... risk fields ...)
+               -> async with get_session() as db ... commit on exit
+             -> await TelemetryLogger.log_threat_update(...)  [telemetry/logger.py]
+               -> structlog only (no DB write)
+           except: log.warning("threat_scoring_error")
+        -> top_technique = mitre_result.techniques[0].id or ""
+        -> await TelemetryLogger.log_command(...)  [telemetry/logger.py]
+          -> async with get_session() as db:
+             -> db.add(Command(...))
+             -> context exit => await session.commit()
+        -> return response  [string]
+      -> self._send(response.rstrip("\\n") + "\\r\\n")
+      -> self._prompt()
+```
+
+DB commit mechanism (authoritative):
+- File: database/db.py
+
+```python
+@asynccontextmanager
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionFactory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+```
+
+
+3️⃣ SESSION STATE STRUCTURE
+
+File: session/session_model.py
+
+```python
+@dataclass
+class SessionState:
+    """Runtime state for an active attacker session."""
+
+    session_id: uuid.UUID
+    source_ip: str
+    username: str
+    start_time: datetime
+
+    # Docker
+    container_id: Optional[str] = None
+
+    # Simulated filesystem state
+    working_directory: str = "/root"
+    fake_fs: dict[str, Any] = field(default_factory=dict)
+
+    # Command history (last N commands sent to AI)
+    command_history: list[dict[str, Any]] = field(default_factory=list)
+
+    # AI memory context (list of messages for LLM)
+    ai_memory: list[dict[str, str]] = field(default_factory=list)
+
+    # AI-derived profile (updated per command)
+    attacker_type: Optional[str] = None
+    primary_objective: Optional[str] = None
+    sophistication_level: Optional[str] = None
+    intent_confidence: float = 0.0
+
+    # Threat scoring
+    risk_score: float = 0.0
+    threat_level: str = "UNKNOWN"
+    likelihood_apt: float = 0.0
+
+    # Canary tracking
+    deployed_canaries: list[str] = field(default_factory=list)
+```
+
+Lifecycle implementation:
+- Creation: session/session_manager.py#L33-L74
+- Mutation:
+  - Command history append: session/session_manager.py#L143-L153
+  - Threat/profile updates: session/session_manager.py#L78-L141
+  - fake_fs updates: ai_core/environment_shaper.py#L75-L84
+  - working_directory updates: ai_core/response_generator.py#L95-L98
+  - AI memory append: ai_core/response_generator.py#L108-L111
+- Destruction:
+  - Pop from in-memory store and DB close status update: session/session_manager.py#L155-L180
+  - Trigger path: gateway/ssh_server.py#L136-L154
+
+
+4️⃣ DATABASE SCHEMA (Authoritative)
+
+File: database/models.py
+
+```python
+class Session(Base):
+    __tablename__ = "sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    source_ip: Mapped[str] = mapped_column(String(45), nullable=False)
+    username: Mapped[str] = mapped_column(String(128), nullable=False, default="root")
+    start_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    end_time: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    threat_level: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    risk_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    attacker_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    primary_objective: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    sophistication_level: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="active")  # active | closed
+```
+
+```python
+class Command(Base):
+    __tablename__ = "commands"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    command: Mapped[str] = mapped_column(Text, nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    ai_classification: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    mitre_technique: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+```
+
+```python
+class MitreMapping(Base):
+    __tablename__ = "mitre_mappings"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    technique_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    technique_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    tactic: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+```
+
+```python
+class BeaconEvent(Base):
+    __tablename__ = "beacon_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    token_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    triggered_ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    triggered_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+```
+
+```python
+class Report(Base):
+    __tablename__ = "reports"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    report_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+```
+
+
+5️⃣ OLLAMA CLIENT IMPLEMENTATION
+
+File: ai_core/llm_client.py
+
+```python
+class LLMClient:
+    """Stateless LLM wrapper targeting a local Ollama server; session memory is passed in per call."""
+
+    def __init__(self) -> None:
+        self._client = AsyncOpenAI(
+            base_url=settings.OLLAMA_BASE_URL,
+            api_key="ollama",  # Ollama ignores this value; SDK requires non-empty string
+        )
+
+    async def chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        json_mode: bool = True,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+    ) -> dict[str, Any]:
+        response = await self._client.chat.completions.create(
+            model=settings.OLLAMA_MODEL,
+            messages=messages,  # type: ignore[arg-type]
+            max_tokens=max_tokens or settings.LLM_MAX_TOKENS,
+            temperature=temperature if temperature is not None else settings.LLM_TEMPERATURE,
+            # response_format is intentionally omitted – not universally supported by Ollama models
+        )
+        raw = response.choices[0].message.content or "{}"
+        if json_mode:
+            raw = _extract_json(raw)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            log.warning("llm_invalid_json", raw=raw[:200])
+            return {"raw": raw}
+```
+
+JSON mode enforcement:
+- _extract_json strips fenced blocks and falls back to first {...} region: ai_core/llm_client.py#L38-L49
+
+```python
+def _extract_json(raw: str) -> str:
+    match = _FENCE_RE.search(raw)
+    if match:
+        return match.group(1)
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return raw[start : end + 1]
+    return raw
+```
+
+Timeout behavior:
+- No explicit timeout argument configured in AsyncOpenAI(...) or chat.completions.create(...).
+
+Retry logic:
+- No retry loop/backoff implemented.
+
+Invalid JSON handling:
+- json.loads exception -> structlog warning llm_invalid_json -> returns {"raw": raw}.
+
+
+6️⃣ ENVIRONMENT EMULATION LOGIC
+
+fake_fs structure definition:
+- File: session/session_model.py
+
+```python
+fake_fs: dict[str, Any] = field(default_factory=dict)
+```
+
+Injected file persistence into fake_fs:
+- File: ai_core/environment_shaper.py
+
+```python
+for f in result.get("injected_files", []):
+    path = f.get("path", "")
+    if path:
+        session_state.fake_fs[path] = {
+            "content_hint": f.get("content_hint", ""),
+            "is_bait": f.get("is_bait", False),
+        }
+```
+
+working_directory storage and update:
+- Definition: session/session_model.py
+
+```python
+working_directory: str = "/root"
+```
+
+- Update path: ai_core/response_generator.py
+
+```python
+new_wd: str | None = result.get("new_working_directory")
+
+if new_wd:
+    session_state.working_directory = new_wd
+```
+
+cd validation behavior:
+- Prompt-level instruction only; no server-side path validation function.
+- File: ai_core/response_generator.py
+
+```python
+Rules:
+2. If the command is `cd <dir>`, update the directory and produce no output (empty string for output).
+```
+
+No deterministic validator exists in code for new_working_directory path correctness.
+
+
+7️⃣ WEBSOCKET IMPLEMENTATION
+
+File: dashboard/backend/websocket.py
+
+```python
+class ConnectionManager:
+    def __init__(self) -> None:
+        self._connections: set[WebSocket] = set()
+        self._lock = asyncio.Lock()
+
+    async def connect(self, ws: WebSocket) -> None:
+        await ws.accept()
+        async with self._lock:
+            self._connections.add(ws)
+        log.info("ws_client_connected", total=len(self._connections))
+
+    async def disconnect(self, ws: WebSocket) -> None:
+        async with self._lock:
+            self._connections.discard(ws)
+        log.info("ws_client_disconnected", total=len(self._connections))
+
+    async def broadcast(self, event: dict[str, Any]) -> None:
+        if "timestamp" not in event:
+            event["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+        dead: list[WebSocket] = []
+        async with self._lock:
+            clients = list(self._connections)
+
+        for ws in clients:
+            try:
+                await ws.send_json(event)
+            except Exception:
+                dead.append(ws)
+
+        if dead:
+            async with self._lock:
+                for ws in dead:
+                    self._connections.discard(ws)
+            log.warning("ws_stale_connections_removed", count=len(dead))
+
+    @staticmethod
+    def make_event(
+        event_type: str,
+        session_id: str,
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "type": event_type,
+            "session_id": session_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "data": data,
+        }
+```
+
+WebSocket endpoint:
+- File: dashboard/backend/websocket.py
+
+```python
+@ws_router.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket) -> None:
+    await manager.connect(ws)
+    try:
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        log.warning("ws_unexpected_error", error=str(exc))
+    finally:
+        await manager.disconnect(ws)
+```
+
+Where invoked:
+- Manager instantiated and router registered: dashboard/backend/main.py#L72-L74, dashboard/backend/main.py#L133-L134
+- broadcast() call in codebase:
+  - Demo-only path /ws-test: dashboard/backend/routes.py#L299-L304
+
+```python
+for abs_ts, event in script:
+    interval = abs_ts - prev_ts
+    if interval > 0:
+        await asyncio.sleep(interval)
+    prev_ts = abs_ts
+    await ws_manager.broadcast(event)
+```
+
+No production attacker command path invocation of ws_manager.broadcast(...) exists in interceptor/session/ssh flow.
+
+
+8️⃣ PERFORMANCE METRICS (IF LOGGED)
+
+Latency/throughput instrumentation in code:
+- No explicit LLM duration timing.
+- No DB commit timing.
+- No session throughput counters.
+- No histogram/summary instrumentation.
+
+Relevant logging present (event logs only, not timings):
+- File: telemetry/logger.py
+  - command, mitre_mapping, threat_score_update, beacon_triggered, report_generated
+- File: interception/command_interceptor.py
+  - command_intercepted, mitre_mapping_error, threat_scoring_error
+- File: ai_core/llm_client.py
+  - llm_invalid_json
+
+Search result for timing keywords in project code returned no runtime timing metrics beyond report content duration field construction in report prompt context.

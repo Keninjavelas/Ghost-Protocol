@@ -8,7 +8,7 @@ Every terminal command from the attacker flows through here:
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import structlog
 
@@ -24,6 +24,7 @@ from telemetry.logger import TelemetryLogger
 
 if TYPE_CHECKING:
     from session.session_model import SessionState
+    from dashboard.backend.websocket import ConnectionManager
 
 log = structlog.get_logger(__name__)
 
@@ -45,6 +46,7 @@ class CommandInterceptor:
         response_generator: ResponseGenerator,
         report_generator: ReportGenerator,
         telemetry: TelemetryLogger,
+        ws_manager: Optional["ConnectionManager"] = None,
     ) -> None:
         self._session_mgr = session_manager
         self._llm = llm_client
@@ -55,6 +57,7 @@ class CommandInterceptor:
         self._responder = response_generator
         self._reporter = report_generator
         self._telemetry = telemetry
+        self._ws = ws_manager
 
     async def process(
         self,
@@ -69,9 +72,34 @@ class CommandInterceptor:
         ts = datetime.now(timezone.utc)
 
         log.info("command_intercepted", session_id=str(sid), command=command)
+        
+        # ── WebSocket Event: command_received ──────────────────────────────────
+        if self._ws:
+            await self._ws.broadcast(
+                self._ws.make_event(
+                    "command_received",
+                    str(sid),
+                    {"command": command},
+                )
+            )
 
         # ── 1. Intent Inference ────────────────────────────────────────────────
         intent = await self._intent.infer(session_state)
+        
+        # ── WebSocket Event: intent_inferred ───────────────────────────────────
+        if self._ws:
+            await self._ws.broadcast(
+                self._ws.make_event(
+                    "intent_inferred",
+                    str(sid),
+                    {
+                        "attacker_type": intent.get("attacker_type"),
+                        "primary_objective": intent.get("primary_objective"),
+                        "sophistication_level": intent.get("sophistication_level"),
+                        "confidence": intent.get("confidence"),
+                    },
+                )
+            )
 
         # ── 2. Update session threat profile ──────────────────────────────────
         await self._session_mgr.update_threat_profile(
@@ -91,10 +119,55 @@ class CommandInterceptor:
             command=command,
             env_context=env_context,
         )
+        
+        # ── 4a. Credential Theft Detection ────────────────────────────────────
+        # Check if response generator detected credential file access
+        credential_access_events = getattr(session_state, 'credential_accesses', [])
+        if credential_access_events:
+            # Get the most recent credential access event
+            latest_access = credential_access_events[-1]
+            
+            # Log credential access to telemetry
+            await self._telemetry.log_credential_access(
+                session_id=sid,
+                file_path=latest_access["file"],
+                command=latest_access["command"],
+                mitre_technique=latest_access.get("mitre_technique"),
+            )
+            
+            # ── WebSocket Event: credential_access_detected ────────────────────
+            if self._ws:
+                await self._ws.broadcast(
+                    self._ws.make_event(
+                        "credential_access_detected",
+                        str(sid),
+                        {
+                            "file": latest_access["file"],
+                            "command": latest_access["command"],
+                            "technique": latest_access.get("mitre_technique", "T1552"),
+                            "severity": "HIGH",
+                        },
+                    )
+                )
 
         # ── 5. MITRE Mapping (parallel-ish, fire-and-forget telemetry) ─────────
         try:
             mitre_result = await self._mitre.map(command, intent)
+            
+            # ── WebSocket Event: mitre_mapped ──────────────────────────────────
+            if self._ws:
+                await self._ws.broadcast(
+                    self._ws.make_event(
+                        "mitre_mapped",
+                        str(sid),
+                        {
+                            "command": command,
+                            "techniques": mitre_result.get("techniques", []),
+                            "tactics_detected": mitre_result.get("tactics_detected", []),
+                        },
+                    )
+                )
+            
             for technique in mitre_result.get("techniques", []):
                 await self._telemetry.log_mitre(
                     session_id=sid,
@@ -109,10 +182,14 @@ class CommandInterceptor:
 
         # ── 6. Threat Scoring ──────────────────────────────────────────────────
         try:
+            # Count credential accesses for threat escalation
+            credential_count = len(getattr(session_state, 'credential_accesses', []))
+            
             threat = self._scorer.score(
                 intent=intent,
                 mitre_result=mitre_result,
                 command_count=len(session_state.command_history),
+                credential_access_count=credential_count,
             )
             await self._session_mgr.update_threat_profile(
                 sid,
@@ -120,6 +197,23 @@ class CommandInterceptor:
                 threat_level=threat.get("threat_level"),
                 likelihood_apt=threat.get("likelihood_APT"),
             )
+            
+            # ── WebSocket Event: threat_updated ────────────────────────────────
+            if self._ws:
+                await self._ws.broadcast(
+                    self._ws.make_event(
+                        "threat_updated",
+                        str(sid),
+                        {
+                            "risk_score": threat["risk_score"],
+                            "threat_level": threat["threat_level"],
+                            "attacker_category": threat.get("attacker_category", "unknown"),
+                            "likelihood_apt": threat.get("likelihood_APT", 0.0),
+                            "credential_theft_detected": credential_count > 0,
+                        },
+                    )
+                )
+            
             await self._telemetry.log_threat_update(
                 session_id=sid,
                 risk_score=threat["risk_score"],
@@ -142,5 +236,18 @@ class CommandInterceptor:
             ai_classification=intent.get("primary_objective"),
             mitre_technique=top_technique,
         )
+        
+        # ── WebSocket Event: command_output ────────────────────────────────────
+        if self._ws:
+            await self._ws.broadcast(
+                self._ws.make_event(
+                    "command_output",
+                    str(sid),
+                    {
+                        "command": command,
+                        "output": response[:500],  # Truncate long outputs
+                    },
+                )
+            )
 
         return response
