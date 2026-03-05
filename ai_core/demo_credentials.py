@@ -389,6 +389,51 @@ def generate_credential_summary() -> dict[str, str]:
     }
 
 
+# ── Convenience Wrapper Functions (Alternative API) ───────────────────────────
+
+
+def generate_demo_api_key(service: str = "API") -> str:
+    """
+    Convenience wrapper for generate_api_key().
+    Generate a synthetic API key for honeypot scenarios.
+    
+    Args:
+        service: Service name for the key
+    
+    Returns:
+        str: Honeypot API key
+    """
+    return generate_api_key(service)
+
+
+def generate_demo_password(username: str = "user") -> str:
+    """
+    Convenience wrapper for generate_user_password().
+    Generate a synthetic user password for honeypot scenarios.
+    
+    Args:
+        username: Username the password is for
+    
+    Returns:
+        str: Honeypot password
+    """
+    return generate_user_password(username)
+
+
+def generate_demo_token(service: str = "ACCESS") -> str:
+    """
+    Convenience wrapper for generate_access_token().
+    Generate a synthetic access token for honeypot scenarios.
+    
+    Args:
+        service: Service name for the token
+    
+    Returns:
+        str: Honeypot access token
+    """
+    return generate_access_token(service)
+
+
 # ── Module Initialization ──────────────────────────────────────────────────────
 
 
