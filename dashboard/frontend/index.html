@@ -35,108 +35,205 @@
   </div>
 </header>
 
-<!-- ═══════════════════  DASHBOARD GRID  ═══════════════════ -->
-<main class="dashboard">
+<!-- ═══════════════════  DASHBOARD LAYOUT  ═══════════════════ -->
+<main class="dashboard-frame">
 
-  <!-- LEFT: Terminal -->
-  <section class="panel panel-terminal" id="panel-terminal">
-    <div class="panel-header">
-      <span class="panel-title">ATTACKER TERMINAL</span>
-      <span class="panel-badge" id="cmd-count">0 cmds</span>
-    </div>
-    <div class="terminal-body" id="terminal-output">
-      <div class="empty-state">Waiting for attacker session…</div>
-    </div>
-  </section>
+  <!-- TAB NAVIGATION -->
+  <div class="tabs-header">
+    <button class="tab-btn active" data-tab="dashboard-tab">DASHBOARD</button>
+    <button class="tab-btn" data-tab="logs-tab">LOGS</button>
+  </div>
 
-  <!-- RIGHT: stacked panels -->
-  <div class="right-col">
+  <!-- ─────────────────  DASHBOARD TAB  ───────────────────── -->
+  <div id="dashboard-tab" class="tab-content active">
 
-    <!-- TOP ROW: Intent + Gauge -->
-    <div class="right-top">
-
-      <!-- Intent Card -->
-      <section class="panel panel-intent">
-        <div class="panel-header">
-          <span class="panel-title">AI INTENT ANALYSIS</span>
-          <span class="panel-badge" id="intent-conf-badge">—</span>
-        </div>
-        <div class="intent-body">
-          <div class="intent-row">
-            <span class="ilabel">ATTACKER TYPE</span>
-            <span class="ivalue" id="i-type">—</span>
-          </div>
-          <div class="intent-row">
-            <span class="ilabel">PRIMARY INTENT</span>
-            <span class="ivalue" id="i-intent">—</span>
-          </div>
-          <div class="intent-row">
-            <span class="ilabel">SOPHISTICATION</span>
-            <span class="ivalue" id="i-soph">—</span>
-          </div>
-          <div class="intent-row">
-            <span class="ilabel">CONFIDENCE</span>
-            <span class="ivalue" id="i-conf">—</span>
-          </div>
-          <div class="conf-bar-track">
-            <div class="conf-bar-fill" id="conf-bar"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Threat Gauge -->
-      <section class="panel panel-threat" id="panel-threat">
-        <div class="panel-header">
-          <span class="panel-title">THREAT LEVEL</span>
-          <span class="panel-badge threat-badge" id="threat-level-badge">LOW</span>
-        </div>
-        <div class="gauge-body">
-          <div class="gauge-score-row">
-            <span class="gauge-score" id="gauge-score">0.0</span>
-            <span class="gauge-denom">/ 10</span>
-          </div>
-          <div class="gauge-segments" id="gauge-segments"></div>
-          <div class="gauge-axis">
-            <span>LOW</span><span>MED</span><span>HIGH</span>
-          </div>
-        </div>
-      </section>
-    </div>
-
-    <!-- MITRE HEATMAP -->
-    <section class="panel panel-mitre">
+    <!-- SECTION 1: Session Snapshot (Top) -->
+    <section class="panel panel-snapshot">
       <div class="panel-header">
-        <span class="panel-title">MITRE ATT&amp;CK HEATMAP</span>
-        <span class="panel-badge" id="mitre-count">0 techniques</span>
+        <span class="panel-title">SESSION SNAPSHOT</span>
+        <span class="panel-badge" id="snap-status">ACTIVE</span>
       </div>
-      <div class="mitre-grid" id="mitre-grid"></div>
+      <div class="snapshot-grid">
+        <div class="snap-item">
+          <span class="snap-label">🎯 OBJECTIVE</span>
+          <span class="snap-value" id="snap-objective">—</span>
+        </div>
+        <div class="snap-item">
+          <span class="snap-label">🧠 TYPE</span>
+          <span class="snap-value" id="snap-type">—</span>
+        </div>
+        <div class="snap-item">
+          <span class="snap-label">⚠ THREAT</span>
+          <span class="snap-value" id="snap-threat">LOW</span>
+        </div>
+        <div class="snap-item">
+          <span class="snap-label">⌨ COMMANDS</span>
+          <span class="snap-value" id="snap-cmds">0</span>
+        </div>
+        <div class="snap-item">
+          <span class="snap-label">⏱ DURATION</span>
+          <span class="snap-value" id="snap-duration">0m 0s</span>
+        </div>
+        <div class="snap-item">
+          <span class="snap-label">🎲 TECHNIQUES</span>
+          <span class="snap-value" id="snap-techniques">0</span>
+        </div>
+      </div>
     </section>
 
-  </div><!-- /right-col -->
+    <!-- SECTION 2: Attack Summary -->
+    <section class="panel panel-summary">
+      <div class="panel-header">
+        <span class="panel-title">ATTACK NARRATIVE</span>
+      </div>
+      <div class="summary-body" id="summary-text">
+        <div class="empty-state">Loading attack summary…</div>
+      </div>
+    </section>
 
-  <!-- BOTTOM-LEFT: Timeline -->
-  <section class="panel panel-timeline">
-    <div class="panel-header">
-      <span class="panel-title">ATTACK TIMELINE</span>
-      <button class="demo-btn" id="demo-btn" onclick="runDemo()">▶ DEMO MODE</button>
-    </div>
-    <div class="timeline-body" id="timeline-output">
-      <div class="empty-state">No events recorded.</div>
-    </div>
-  </section>
+    <!-- SECTION 3-5: Timeline, Intelligence, Risk (3-column grid) -->
+    <div class="dashboard-grid">
+      
+      <!-- LEFT: Timeline -->
+      <section class="panel panel-timeline">
+        <div class="panel-header">
+          <span class="panel-title">ATTACK TIMELINE</span>
+          <button class="demo-btn" id="demo-btn" onclick="runDemo()">▶ DEMO</button>
+        </div>
+        <div class="timeline-body" id="timeline-output">
+          <div class="empty-state">No events recorded.</div>
+        </div>
+      </section>
 
-  <!-- BOTTOM-RIGHT: Beacons -->
-  <section class="panel panel-beacon">
-    <div class="panel-header">
-      <span class="panel-title">BEACON ALERTS</span>
-      <span class="panel-badge danger-badge" id="beacon-count">0</span>
-    </div>
-    <div class="beacon-body" id="beacon-output">
-      <div class="empty-state">No canary triggers.</div>
-    </div>
-  </section>
+      <!-- CENTER: Attacker Intelligence + Risk Gauge -->
+      <div class="center-col">
 
-</main>
+        <!-- Intelligence Card -->
+        <section class="panel panel-intelligence">
+          <div class="panel-header">
+            <span class="panel-title">INTELLIGENCE</span>
+            <span class="panel-badge" id="intel-conf">—</span>
+          </div>
+          <div class="intel-body">
+            <div class="intel-item">
+              <span class="intel-icon">🎯</span>
+              <div class="intel-content">
+                <span class="intel-label">Objective</span>
+                <span class="intel-value" id="intel-objective">—</span>
+              </div>
+            </div>
+            <div class="intel-item">
+              <span class="intel-icon">🧠</span>
+              <div class="intel-content">
+                <span class="intel-label">AI Confidence</span>
+                <span class="intel-value" id="intel-conf-pct">—</span>
+              </div>
+            </div>
+            <div class="intel-item">
+              <span class="intel-icon">⚔</span>
+              <div class="intel-content">
+                <span class="intel-label">Sophistication</span>
+                <span class="intel-value" id="intel-soph">—</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Risk Gauge -->
+        <section class="panel panel-risk">
+          <div class="panel-header">
+            <span class="panel-title">THREAT METER</span>
+          </div>
+          <div class="risk-body">
+            <div class="risk-score-display">
+              <span class="risk-num" id="risk-score">0</span>
+              <span class="risk-max">/100</span>
+            </div>
+            <div class="risk-bar">
+              <div class="risk-fill" id="risk-fill"></div>
+            </div>
+            <div class="risk-label-row">
+              <span>LOW</span>
+              <span class="risk-level" id="risk-level-label">LOW</span>
+              <span>CRITICAL</span>
+            </div>
+          </div>
+        </section>
+
+      </div><!-- /center-col -->
+
+      <!-- RIGHT: MITRE Heatmap + Beacons -->
+      <div class="right-col">
+
+        <!-- MITRE Heatmap -->
+        <section class="panel panel-mitre">
+          <div class="panel-header">
+            <span class="panel-title">MITRE ATT&CK</span>
+            <span class="panel-badge" id="mitre-count">0</span>
+          </div>
+          <div class="mitre-grid" id="mitre-grid"></div>
+        </section>
+
+        <!-- Beacons -->
+        <section class="panel panel-beacon">
+          <div class="panel-header">
+            <span class="panel-title">BEACONS 🚨</span>
+            <span class="panel-badge danger-badge" id="beacon-count">0</span>
+          </div>
+          <div class="beacon-body" id="beacon-output">
+            <div class="empty-state">No canary triggers.</div>
+          </div>
+        </section>
+
+      </div><!-- /right-col -->
+
+    </div><!-- /dashboard-grid -->
+
+    <!-- SECTION: Terminal (Bottom) -->
+    <section class="panel panel-terminal">
+      <div class="panel-header">
+        <span class="panel-title">ATTACKER TERMINAL</span>
+        <span class="panel-badge" id="cmd-count">0 cmds</span>
+      </div>
+      <div class="terminal-body" id="terminal-output">
+        <div class="empty-state">Waiting for attacker session…</div>
+      </div>
+    </section>
+
+  </div><!-- /dashboard-tab -->
+
+  <!-- ─────────────────  LOGS TAB  ───────────────────── -->
+  <div id="logs-tab" class="tab-content">
+
+    <section class="panel panel-logs">
+      <div class="panel-header">
+        <span class="panel-title">STRUCTURED LOGS</span>
+        <div class="logs-filters">
+          <button class="filter-btn active" data-filter="all">All</button>
+          <button class="filter-btn" data-filter="commands">Commands</button>
+          <button class="filter-btn" data-filter="mitre">MITRE</button>
+          <button class="filter-btn" data-filter="system">System</button>
+        </div>
+      </div>
+      <div class="logs-table-container">
+        <table class="logs-table" id="logs-table">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Event Type</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody id="logs-tbody">
+            <tr><td colspan="3" class="empty-msg">Loading logs…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </div><!-- /logs-tab -->
+
+</main><!-- /dashboard-frame -->
 
 <script src="/static/app.js"></script>
 </body>

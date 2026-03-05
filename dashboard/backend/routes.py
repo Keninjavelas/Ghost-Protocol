@@ -41,6 +41,49 @@ router = APIRouter(tags=["dashboard"])
 _DEMO_SESSION_ID = "demo-0000-0000-0000-000000000001"
 
 
+def _generate_attack_narrative(session: DBSession) -> str:
+    """Generate a human-readable attack summary from session data."""
+    if not session:
+        return "No attack data available."
+    
+    objective = (session.primary_objective or "unknown").lower()
+    attacker = (session.attacker_type or "unknown").lower()
+    techniques = [m.technique_id for m in session.mitre_mappings]
+    commands = len(session.commands)
+    
+    # Build narrative
+    parts = []
+    
+    # Opening
+    if "opportunity" in attacker or "script" in attacker:
+        parts.append(f"The attacker engaged in {objective.replace('-', ' ')} behavior, "
+                    "suggesting an opportunistic rather than targeted approach.")
+    elif "apt" in attacker or "nation" in attacker:
+        parts.append(f"Advanced persistent threat behavior detected. "
+                    f"Attacker objectives include {objective.replace('-', ' ')}.")
+    else:
+        parts.append(f"The attacker initiated a {objective.replace('-', ' ')} campaign "
+                    f"({commands} commands executed).")
+    
+    # MITRE behavior
+    if techniques:
+        tactics_set = set(m.tactic for m in session.mitre_mappings if m.tactic)
+        tactics_str = ", ".join(sorted(tactics_set)[:3])
+        parts.append(f"MITRE ATT&CK analysis reveals {len(techniques)} techniques "
+                    f"across {tactics_str}.")
+    
+    # Threat assessment
+    if session.risk_score and session.risk_score > 70:
+        parts.append(f"Risk score ({session.risk_score:.0f}/100) indicates HIGH severity. "
+                    "Immediate containment recommended.")
+    elif session.risk_score and session.risk_score > 40:
+        parts.append(f"Risk score ({session.risk_score:.0f}/100) indicates MEDIUM severity.")
+    else:
+        parts.append(f"Risk score ({session.risk_score:.0f}/100) indicates LOW severity.")
+    
+    return " ".join(parts)
+
+
 def create_dashboard_router(
     session_manager: SessionManager,
     ws_manager: ConnectionManager,
@@ -223,6 +266,172 @@ def create_dashboard_router(
             "session_id": session_id,
             "generated_at": report.generated_at.isoformat(),
             "report": report.report_json,
+        }
+
+    # ── Session Snapshot (Quick Summary for Judges) ────────────────────────────
+    @router.get("/snapshot/{session_id}")
+    async def get_session_snapshot(
+        session_id: str,
+        db: AsyncSession = Depends(get_db_session),
+    ) -> dict[str, Any]:
+        """
+        Return a judge-friendly session snapshot with all key intelligence.
+        Displayed at the top of the dashboard for instant understanding.
+        """
+        try:
+            uid = uuid.UUID(session_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid session ID")
+
+        # Get session
+        s = await db.execute(
+            select(DBSession)
+            .where(DBSession.id == uid)
+            .options(selectinload(DBSession.commands), selectinload(DBSession.mitre_mappings))
+        )
+        session = s.scalar_one_or_none()
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Calculate session duration
+        start = session.start_time
+        end = session.end_time or datetime.now(timezone.utc)
+        duration_seconds = int((end - start).total_seconds()) if start else 0
+        duration_str = f"{duration_seconds // 60}m {duration_seconds % 60}s"
+
+        # Collect unique MITRE techniques
+        techniques = {}
+        tactics = {}
+        for mm in session.mitre_mappings:
+            if mm.technique_id not in techniques:
+                techniques[mm.technique_id] = {
+                    "id": mm.technique_id,
+                    "name": mm.technique_name,
+                    "tactic": mm.tactic,
+                }
+            if mm.tactic:
+                tactics[mm.tactic] = tactics.get(mm.tactic, 0) + 1
+
+        return {
+            "session_id": str(session.id),
+            "source_ip": session.source_ip,
+            "username": session.username,
+            "attacker_type": session.attacker_type or "Unknown",
+            "primary_objective": session.primary_objective or "Unknown",
+            "threat_level": session.threat_level or "UNKNOWN",
+            "risk_score": session.risk_score or 0,
+            "sophistication_level": session.sophistication_level or "Unknown",
+            "commands_executed": len(session.commands),
+            "session_duration": duration_str,
+            "mitre_techniques": list(techniques.values())[:10],  # Top 10
+            "mitre_tactics": sorted(tactics.items(), key=lambda x: x[1], reverse=True)[:5],  # Top 5
+            "status": session.status,
+            "start_time": session.start_time.isoformat() if session.start_time else None,
+            "end_time": session.end_time.isoformat() if session.end_time else None,
+        }
+
+    # ── Attack Summary (AI-Generated) ──────────────────────────────────────────
+    @router.get("/attack-summary/{session_id}")
+    async def get_attack_summary(
+        session_id: str,
+        db: AsyncSession = Depends(get_db_session),
+    ) -> dict[str, Any]:
+        """
+        Return an AI-generated narrative summary of the attack.
+        Used for judges to quickly understand attacker behavior.
+        """
+        try:
+            uid = uuid.UUID(session_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid session ID")
+
+        s = await db.execute(
+            select(DBSession)
+            .where(DBSession.id == uid)
+            .options(selectinload(DBSession.commands), selectinload(DBSession.mitre_mappings))
+        )
+        session = s.scalar_one_or_none()
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Build summary from session data
+        summary = _generate_attack_narrative(session)
+        
+        return {
+            "session_id": str(session.id),
+            "summary": summary,
+            "confidence": 0.85,  # Base confidence
+            "attacker_type": session.attacker_type,
+            "primary_objective": session.primary_objective,
+        }
+
+    # ── Logs Endpoint (Technical Event Log) ──────────────────────────────────
+    @router.get("/logs/{session_id}")
+    async def get_session_logs(
+        session_id: str,
+        event_type: str = "all",
+        limit: int = 200,
+        db: AsyncSession = Depends(get_db_session),
+    ) -> dict[str, Any]:
+        """
+        Return structured technical logs for a session.
+        Event types: all, commands, ai_analysis, mitre, system
+        """
+        try:
+            uid = uuid.UUID(session_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid session ID")
+
+        s = await db.execute(
+            select(DBSession)
+            .where(DBSession.id == uid)
+            .options(selectinload(DBSession.commands), selectinload(DBSession.mitre_mappings))
+        )
+        session = s.scalar_one_or_none()
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        logs = []
+
+        # SESSION log entry
+        if event_type in ("all", "system"):
+            logs.append({
+                "timestamp": session.start_time.isoformat() if session.start_time else None,
+                "event_type": "SESSION",
+                "details": f"Session started: {session.source_ip} / {session.username}",
+                "severity": "INFO",
+            })
+
+        # COMMAND log entries
+        if event_type in ("all", "commands"):
+            for cmd in sorted(session.commands, key=lambda c: c.timestamp):
+                logs.append({
+                    "timestamp": cmd.timestamp.isoformat(),
+                    "event_type": "COMMAND",
+                    "details": f"$ {cmd.command}",
+                    "severity": "INFO",
+                })
+
+        # MITRE_MAPPING log entries
+        if event_type in ("all", "mitre"):
+            for mm in sorted(session.mitre_mappings, key=lambda m: m.timestamp):
+                logs.append({
+                    "timestamp": mm.timestamp.isoformat(),
+                    "event_type": "MITRE",
+                    "details": f"{mm.technique_id} ({mm.tactic}): {mm.technique_name} [conf: {mm.confidence}]",
+                    "severity": "HIGH" if mm.confidence and mm.confidence > 0.7 else "MEDIUM",
+                })
+
+        # Sort by timestamp descending
+        logs.sort(key=lambda x: x["timestamp"], reverse=True)
+        logs = logs[:limit]
+
+        return {
+            "session_id": str(session.id),
+            "total_logs": len(logs),
+            "filters_available": ["all", "commands", "ai_analysis", "mitre", "system"],
+            "current_filter": event_type,
+            "logs": logs,
         }
 
     # ── Demo burst ────────────────────────────────────────────────────────────

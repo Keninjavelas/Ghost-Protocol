@@ -99,6 +99,37 @@ html, body { height: 100%; overflow: hidden; background: var(--bg);
 .clock { font-family: var(--mono); font-size: 12px; color: var(--text-dim); letter-spacing: 1px; }
 
 /* ── Dashboard Grid ──────────────────────────────────────── */
+.dashboard-frame {
+  display: flex; flex-direction: column;
+  height: calc(100vh - 52px);
+  overflow: hidden;
+}
+
+.tabs-header {
+  display: flex; gap: 0; flex-shrink: 0;
+  background: var(--bg-2); border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+}
+
+.tab-btn {
+  background: transparent; border: none; color: var(--text-dim);
+  font-family: var(--mono); font-size: 12px; letter-spacing: 1.5px;
+  padding: 10px 16px; cursor: pointer; transition: all var(--t);
+  border-bottom: 2px solid transparent;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active {
+  color: var(--cyan); border-bottom-color: var(--cyan);
+}
+
+.tab-content {
+  display: none; flex: 1; overflow: auto;
+  padding: var(--gap);
+}
+.tab-content.active {
+  display: flex; flex-direction: column; gap: var(--gap);
+}
+
 .dashboard {
   display: grid;
   grid-template-columns: 55% 45%;
@@ -107,6 +138,12 @@ html, body { height: 100%; overflow: hidden; background: var(--bg);
   gap: var(--gap); padding: var(--gap);
   height: calc(100vh - 52px);
 }
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: var(--gap);
+
 
 /* ── Panel Base ──────────────────────────────────────────── */
 .panel {
@@ -280,3 +317,337 @@ html, body { height: 100%; overflow: hidden; background: var(--bg);
 
 /* ── Shared Animations ───────────────────────────────────── */
 @keyframes fadeIn { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:none; } }
+
+/* ═════════════════════════════════════════════════════════════
+   NEW JUDGE-FRIENDLY DASHBOARD COMPONENTS
+═════════════════════════════════════════════════════════════ */
+
+/* ── Session Snapshot (Top Panel) ────────────────────────── */
+.panel-snapshot {
+  grid-column: 1 / -1;
+  border: 2px solid var(--cyan);
+  box-shadow: 0 0 12px rgba(0,229,255,.15);
+}
+.panel-snapshot .panel-header {
+  background: linear-gradient(90deg, rgba(0,229,255,.07), transparent);
+  border-bottom: 2px solid var(--cyan);
+}
+.snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  padding: 12px;
+  flex: 1;
+}
+.snap-item {
+  background: rgba(0,229,255,.04);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-s);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.snap-label {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--cyan);
+  font-weight: 500;
+}
+.snap-value {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--white);
+  font-weight: 500;
+}
+
+/* ── Attack Summary Panel ────────────────────────────────── */
+.panel-summary {
+  grid-column: 1 / -1;
+  max-height: 120px;
+}
+.summary-body {
+  padding: 12px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-y: auto;
+}
+
+/* ── Dashboard 3-column Grid ─────────────────────────────── */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: var(--gap);
+}
+
+.center-col {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: var(--gap);
+}
+
+.right-col {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: var(--gap);
+}
+
+/* ── Attacker Intelligence Card ──────────────────────────– */
+.panel-intelligence {
+  display: flex;
+  flex-direction: column;
+}
+.intel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  flex: 1;
+  justify-content: space-around;
+}
+.intel-item {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.intel-item:last-child {
+  border-bottom: none;
+}
+.intel-icon {
+  font-size: 16px;
+  width: 24px;
+}
+.intel-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+.intel-label {
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.intel-value {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--cyan);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Risk Gauge (Visual Threat Meter) ────────────────────– */
+.panel-risk {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+}
+.risk-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  flex: 1;
+  justify-content: center;
+}
+.risk-score-display {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  justify-content: center;
+}
+.risk-num {
+  font-family: var(--mono);
+  font-size: 48px;
+  font-weight: 600;
+  color: var(--white);
+  line-height: 1;
+  transition: color 0.3s ease;
+}
+.risk-max {
+  font-size: 14px;
+  color: var(--text-dim);
+}
+.risk-bar {
+  width: 100%;
+  height: 16px;
+  background: rgba(0, 229, 255, 0.07);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+}
+.risk-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--green), var(--yellow), var(--red));
+  transition: width 0.4s ease;
+  border-radius: 8px;
+}
+.risk-label-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.risk-level-label {
+  color: var(--white);
+  font-weight: 600;
+}
+
+/* ── Logs Panel (Tab) ────────────────────────────────────– */
+.panel-logs {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.logs-filters {
+  display: flex;
+  gap: 6px;
+}
+.filter-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all var(--t);
+}
+.filter-btn:hover {
+  border-color: var(--border-hi);
+  color: var(--text);
+}
+.filter-btn.active {
+  background: var(--cyan-dim);
+  color: var(--cyan);
+  border-color: var(--cyan);
+}
+.logs-table-container {
+  flex: 1;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+.logs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.logs-table thead {
+  position: sticky;
+  top: 0;
+  background: var(--bg-2);
+  border-bottom: 2px solid var(--border-hi);
+}
+.logs-table th {
+  padding: 8px 12px;
+  text-align: left;
+  color: var(--cyan);
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  border-right: 1px solid var(--border);
+}
+.logs-table th:last-child {
+  border-right: none;
+}
+.logs-table tbody tr {
+  border-bottom: 1px solid var(--border);
+  transition: background 0.2s ease;
+}
+.logs-table tbody tr:hover {
+  background: rgba(0, 229, 255, 0.03);
+}
+.logs-table td {
+  padding: 8px 12px;
+  color: var(--text);
+}
+.logs-table td:nth-child(1) {
+  color: var(--text-dim);
+  width: 150px;
+  flex-shrink: 0;
+}
+.logs-table td:nth-child(2) {
+  color: var(--cyan);
+  width: 100px;
+  flex-shrink: 0;
+}
+.logs-table td:nth-child(3) {
+  word-break: break-word;
+  max-width: 100%;
+}
+.empty-msg {
+  text-align: center;
+  color: var(--text-dim);
+  font-style: italic;
+  padding: 20px !important;
+}
+
+/* ── Timeline Improvements ───────────────────────────────– */
+.panel-timeline {
+  grid-column: 1;
+  grid-row: 2;
+}
+.timeline-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+}
+.tl-row {
+  display: flex;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  animation: fadeIn 0.2s ease;
+}
+.tl-row:hover {
+  background: rgba(0, 229, 255, 0.02);
+  border-left: 2px solid var(--cyan);
+  padding-left: 10px;
+}
+.tl-time {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 70px;
+}
+.tl-text {
+  font-size: 11px;
+  color: var(--text);
+  line-height: 1.4;
+  flex: 1;
+}
+
+/* Responsive fixes for smaller screens */
+@media (max-width: 1600px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .right-col {
+    grid-column: 2;
+  }
+  .panel-timeline {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 1200px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+  .center-col, .right-col, .panel-timeline {
+    grid-column: 1 !important;
+  }
+}

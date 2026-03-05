@@ -250,4 +250,68 @@ class CommandInterceptor:
                 )
             )
 
+        # ── WebSocket Event: attack_timeline ───────────────────────────────────
+        # Emit a comprehensive timeline event for judge-friendly visualization
+        if self._ws:
+            threat_data = {}
+            try:
+                threat = self._scorer.score(
+                    intent=intent,
+                    mitre_result=mitre_result,
+                    command_count=len(session_state.command_history),
+                    credential_access_count=len(getattr(session_state, 'credential_accesses', [])),
+                )
+                threat_data = threat
+            except Exception:
+                pass
+            
+            timeline_event = {
+                "type": "attack_timeline",
+                "session_id": str(sid),
+                "timestamp": ts.isoformat(),
+                "data": {
+                    "timestamp_short": ts.strftime("%H:%M:%S"),
+                    "event_type": "COMMAND",
+                    "command": command,
+                    "intent": intent.get("primary_objective", "unknown"),
+                    "mitre_technique": top_technique,
+                    "mitre_tactic": mitre_result.get("tactics_detected", [None])[0] if mitre_result.get("tactics_detected") else None,
+                    "threat_score": threat_data.get("risk_score", 0),
+                    "threat_level": threat_data.get("threat_level", "UNKNOWN"),
+                    "description": self._generate_timeline_description(command, intent, mitre_result),
+                    "ai_confidence": intent.get("confidence", 0),
+                },
+            }
+            await self._ws.broadcast(timeline_event)
+
         return response
+
+    def _generate_timeline_description(self, command: str, intent: dict, mitre_result: dict) -> str:
+        """Generate a human-readable description for the timeline event."""
+        objective = intent.get("primary_objective", "unknown").lower()
+        
+        keywords = {
+            "credential_harvesting": "Credential file access",
+            "data-exfiltration": "Data exfiltration attempt",
+            "persistence": "Persistence mechanism setup",
+            "reconnaissance": "Reconnaissance activity",
+            "exploration": "System exploration",
+            "lateral-movement": "Lateral movement probe",
+        }
+        
+        for key, desc in keywords.items():
+            if key in objective:
+                return desc
+        
+        if "cat" in command or "less" in command or "more" in command:
+            return "File access"
+        elif "find" in command or "ls" in command or "dir" in command:
+            return "Filesystem enumeration"
+        elif "whoami" in command or "id" in command or "groups" in command:
+            return "Identity detection"
+        elif "curl" in command or "wget" in command or "nc" in command:
+            return "Network connection"
+        elif "chmod" in command or "sudo" in command:
+            return "Privilege escalation attempt"
+        
+        return "System activity"

@@ -100,7 +100,7 @@ function connect() {
 function routeEvent(ev) {
     const { type, session_id, timestamp, data } = ev;
 
-    // Session events always processed (they update the selector itself)
+    // Session events always processed
     if (type === 'session') { handleSession(session_id, data); return; }
 
     // All other events filtered by selected session
@@ -111,6 +111,7 @@ function routeEvent(ev) {
         case 'intent': handleIntent(data); break;
         case 'threat': handleThreat(data); break;
         case 'mitre': handleMitre(data); break;
+        case 'attack_timeline': handleAttackTimeline(timestamp, data); break;
         case 'timeline': handleTimeline(timestamp, data); break;
         case 'beacon': handleBeacon(timestamp, data); break;
         default: console.warn('[ghost] unknown event type:', type);
@@ -167,51 +168,60 @@ function handleCommand(timestamp, data) {
     document.getElementById('cmd-count').textContent = `${state.cmdCount} cmds`;
 }
 
-/* intent ──────────────────────────────────────── */
+/* intent ──────────────────────────────────────– */
 function handleIntent(data) {
-    const { attacker_type, primary_intent, sophistication, confidence } = data;
-    setText('i-type', attacker_type ?? '—');
-    setText('i-intent', primary_intent ?? '—');
-    setText('i-soph', sophistication ?? '—');
-    setText('i-conf', confidence != null ? `${Math.round(confidence * 100)}%` : '—');
-
-    const pct = Math.round((confidence ?? 0) * 100);
-    document.getElementById('conf-bar').style.width = pct + '%';
-    document.getElementById('intent-conf-badge').textContent = pct + '%';
+    const { attacker_type, primary_objective, primary_intent, sophistication_level, sophistication, confidence } = data;
+    
+    const objective = primary_objective || primary_intent || '—';
+    const soph = sophistication_level || sophistication || '—';
+    
+    // Update Intelligence Card
+    const objEl = document.getElementById('intel-objective');
+    if (objEl) objEl.textContent = objective;
+    
+    const sophEl = document.getElementById('intel-soph');
+    if (sophEl) sophEl.textContent = soph;
+    
+    const conf = parseFloat(confidence) || 0;
+    const confPctEl = document.getElementById('intel-conf-pct');
+    if (confPctEl) confPctEl.textContent = `${Math.round(conf * 100)}%`;
+    
+    const badge = document.getElementById('intel-conf');
+    if (badge) badge.textContent = `${Math.round(conf * 100)}%`;
 }
 
 /* threat ──────────────────────────────────────── */
 function handleThreat(data) {
-    // Backend is sole authority for risk_score and threat_level — no frontend computation.
     const { risk_score, threat_level } = data;
     const score = parseFloat(risk_score) || 0;
     const level = (threat_level || 'LOW').toUpperCase();
 
-    // Update score display
-    document.getElementById('gauge-score').textContent = score.toFixed(1);
+    // Update Risk Gauge
+    const scoreEl = document.getElementById('risk-score');
+    if (scoreEl) scoreEl.textContent = score.toFixed(0);
+    
+    const fillEl = document.getElementById('risk-fill');
+    if (fillEl) fillEl.style.width = score + '%';
+    
+    const levelLabel = document.getElementById('risk-level-label');
+    if (levelLabel) {
+        levelLabel.textContent = level;
+        levelLabel.className = 'risk-level-label ' + level.toLowerCase();
+    }
+    
+    // Update Risk score on snapshot
+    const snapThreat = document.getElementById('snap-threat');
+    if (snapThreat) snapThreat.textContent = level;
 
-    // Update badge
-    const badge = document.getElementById('threat-level-badge');
-    badge.textContent = level;
-    badge.className = 'panel-badge threat-badge ' + level.toLowerCase();
-
-    // Animate segments
-    const segs = document.querySelectorAll('.gs');
-    const filled = Math.round(score);
-    segs.forEach((s, i) => {
-        s.className = 'gs';
-        if (i < filled) {
-            s.classList.add(i < 3 ? 'low' : i < 6 ? 'med' : 'high');
-        }
-    });
-
-    // Escalation flash — only when score increases
+    // Escalation flash only when score increases
     if (score > state.prevRiskScore) {
-        const panel = document.getElementById('panel-threat');
-        panel.classList.remove('escalating');
-        void panel.offsetWidth; // reflow to restart animation
-        panel.classList.add('escalating');
-        setTimeout(() => panel.classList.remove('escalating'), 300);
+        const panel = document.querySelector('.panel-risk');
+        if (panel) {
+            panel.classList.remove('escalating');
+            void panel.offsetWidth;
+            panel.classList.add('escalating');
+            setTimeout(() => panel.classList.remove('escalating'), 300);
+        }
     }
     state.prevRiskScore = score;
 }
@@ -228,6 +238,31 @@ function handleMitre(data) {
 
     updateMitreCell(tactic);
     updateMitreCount();
+}
+
+/* attack_timeline ─────────────────────────────– */
+function handleAttackTimeline(timestamp, data) {
+   const out = document.getElementById('timeline-output');
+    const ph = out.querySelector('.empty-state');
+    if (ph) ph.remove();
+
+    while (out.children.length >= MAX_TIMELINE_ENTRIES) out.removeChild(out.firstChild);
+
+    const { timestamp_short, event_type, command, intent, mitre_technique, mitre_tactic, threat_score, threat_level, description, ai_confidence } = data;
+    
+    const ts = timestamp_short || formatTime(timestamp);
+    const tag = INTENT_TAGS[intent?.toLowerCase().replace(' ', '_')] || (intent || '');
+    const techniqueStr = mitre_technique ? ` [${mitre_technique}]` : '';
+    
+    const row = document.createElement('div');
+    row.className = 'tl-row';
+    row.innerHTML =
+        `<span class="tl-time">${esc(ts)}</span>` +
+        `<span class="tl-text">` +
+        `<strong>${esc(command || description)}</strong><br/>` +
+        `<small>${tag}${techniqueStr} · Score: ${threat_score}/${threat_level}</small>` +
+        `</span>`;
+    out.prepend(row);
 }
 
 /* timeline ────────────────────────────────────── */
@@ -297,12 +332,10 @@ function updateMitreCell(tactic) {
     if (!cell) return;
 
     const score = state.tacticHits[tactic] || 0;
-    // Count how many technique IDs map to this tactic
-    const hits = Object.keys(state.mitreHits).length;
-
-    // Assign heat class based on accumulated confidence
+    
+    // Assign heat class based on accumulated count
     cell.className = 'mc ' + heatClass(score);
-    if (cnt) cnt.textContent = Math.ceil(score).toString();
+    if (cnt) cnt.textContent = score > 0 ? score : '—';
 }
 
 function updateMitreCount() {
@@ -334,35 +367,186 @@ function buildGaugeSegments() {
 }
 
 /* ═══════════════════════════════════════════════
-   SESSION SELECTOR
+   SESSION MANAGEMENT
 ═══════════════════════════════════════════════ */
-
-function addSessionOption(session_id, source_ip, username) {
-    const sel = document.getElementById('session-select');
-    // Remove placeholder
-    const ph = sel.querySelector('option[value=""]');
-    if (ph) ph.remove();
-
-    // Avoid duplicates
-    if (document.getElementById('opt-' + session_id)) return;
-
-    const opt = document.createElement('option');
-    opt.id = 'opt-' + session_id;
-    opt.value = session_id;
-    opt.textContent = `${source_ip} (${username})`;
-    sel.appendChild(opt);
-}
 
 function selectSession(session_id) {
     state.selectedSession = session_id;
-    const sel = document.getElementById('session-select');
-    sel.value = session_id;
+    const select = document.getElementById('session-select');
+    if (select) select.value = session_id;
+    
+    // Fetch and display snapshot
+    if (session_id) {
+        fetchSessionSnapshot(session_id);
+        fetchAttackSummary(session_id);
+        fetchSessionLogs(session_id);
+    }
+    
+    // Clear displays on select change
+    clearDashboard();
+}
+
+async function fetchSessionSnapshot(session_id) {
+    try {
+        const response = await fetch(`/snapshot/${session_id}`);
+        if (!response.ok) throw new Error('Failed to fetch snapshot');
+        const snap = await response.json();
+        
+        state.sessionData[session_id] = snap;
+        
+        // Update snapshot display
+        const objEl = document.getElementById('snap-objective');
+        if (objEl) objEl.textContent = snap.primary_objective || '—';
+        
+        const typeEl = document.getElementById('snap-type');
+        if (typeEl) typeEl.textContent = snap.attacker_type || '—';
+        
+        const threatEl = document.getElementById('snap-threat');
+        if (threatEl) threatEl.textContent = snap.threat_level || 'UNKNOWN';
+        
+        const cmdsEl = document.getElementById('snap-cmds');
+        if (cmdsEl) cmdsEl.textContent = String(snap.commands_executed);
+        
+        const durationEl = document.getElementById('snap-duration');
+        if (durationEl) durationEl.textContent = snap.session_duration;
+        
+        const techEl = document.getElementById('snap-techniques');
+        if (techEl) techEl.textContent = String(snap.mitre_techniques.length);
+    } catch (err) {
+        console.warn('[ghost] snapshot fetch error:', err);
+    }
+}
+
+async function fetchAttackSummary(session_id) {
+    try {
+        const response = await fetch(`/attack-summary/${session_id}`);
+        if (!response.ok) throw new Error('Failed to fetch summary');
+        const data = await response.json();
+        
+        const summaryEl = document.getElementById('summary-text');
+        if (summaryEl) summaryEl.innerHTML = `<p>${esc(data.summary)}</p>`;
+    } catch (err) {
+        console.warn('[ghost] summary fetch error:', err);
+    }
+}
+
+async function fetchSessionLogs(session_id, filter = 'all') {
+    try {
+        const response = await fetch(`/logs/${session_id}?event_type=${filter}&limit=500`);
+        if (!response.ok) throw new Error('Failed to fetch logs');
+        const data = await response.json();
+        
+        state.logsCache[session_id] = data.logs;
+        displayLogs(data.logs);
+    } catch (err) {
+        console.warn('[ghost] logs fetch error:', err);
+    }
+}
+
+function displayLogs(logs) {
+    const tbody = document.getElementById('logs-tbody');
+    if (!tbody) return;
+    
+    tbody.innerHTML = '';
+    
+    if (!logs || logs.length === 0) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="3" class="empty-msg">No logs available</td>';
+        tbody.appendChild(tr);
+        return;
+    }
+    
+    logs.forEach(log => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+            `<td>${esc(log.timestamp)}</td>` +
+            `<td>${esc(log.event_type)}</td>` +
+            `<td>${esc(log.details)}</td>`;
+        tbody.appendChild(tr);
+    });
+}
+
+function addSessionOption(session_id, source_ip, username) {
+    const select = document.getElementById('session-select');
+    if (!select) return;
+    if (select.querySelector(`option[value="${session_id}"]`)) return; // Already there
+    
+    const opt = document.createElement('option');
+    opt.value = session_id;
+    opt.textContent = `${source_ip} (${username})`;
+    select.appendChild(opt);
 }
 
 function updateSessionPill() {
     const active = Object.values(state.sessions).filter(s => s.status === 'active').length;
-    document.getElementById('session-count').textContent = `${active} active`;
+    const pill = document.getElementById('session-count');
+    if (pill) pill.textContent = `${active} active`;
 }
+
+function clearDashboard() {
+    state.cmdCount = 0;
+    state.beaconCount = 0;
+    state.mitreHits = {};
+    state.tacticHits = {};
+    state.prevRiskScore = 0;
+    
+    const cntEl = document.getElementById('cmd-count');
+    if (cntEl) cntEl.textContent = '0 cmds';
+    
+    const bcnEl = document.getElementById('beacon-count');
+    if (bcnEl) bcnEl.textContent = '0';
+    
+    const termEl = document.getElementById('terminal-output');
+    if (termEl) termEl.innerHTML = '<div class="empty-state">Waiting for session…</div>';
+    
+    const tlineEl = document.getElementById('timeline-output');
+    if (tlineEl) tlineEl.innerHTML = '<div class="empty-state">No events recorded.</div>';
+    
+    const beaconEl = document.getElementById('beacon-output');
+    if (beaconEl) beaconEl.innerHTML = '<div class="empty-state">No canary triggers.</div>';
+    
+    // Clear snapshot
+    const objEl = document.getElementById('snap-objective');
+    if (objEl) objEl.textContent = '—';
+    
+    const typeEl = document.getElementById('snap-type');
+    if (typeEl) typeEl.textContent = '—';
+    
+    const threatEl = document.getElementById('snap-threat');
+    if (threatEl) threatEl.textContent = 'LOW';
+    
+    const cmdsEl = document.getElementById('snap-cmds');
+    if (cmdsEl) cmdsEl.textContent = '0';
+    
+    const techEl = document.getElementById('snap-techniques');
+    if (techEl) techEl.textContent = '0';
+    
+    // Clear intelligence
+    const intelObjEl = document.getElementById('intel-objective');
+    if (intelObjEl) intelObjEl.textContent = '—';
+    
+    const sophEl = document.getElementById('intel-soph');
+    if (sophEl) sophEl.textContent = '—';
+    
+    const confEl = document.getElementById('intel-conf-pct');
+    if (confEl) confEl.textContent = '—';
+    
+    // Clear risk gauge
+    const scoreEl = document.getElementById('risk-score');
+    if (scoreEl) scoreEl.textContent = '0';
+    
+    const fillEl = document.getElementById('risk-fill');
+    if (fillEl) fillEl.style.width = '0%';
+    
+    const levelEl = document.getElementById('risk-level-label');
+    if (levelEl) levelEl.textContent = 'LOW';
+    
+    buildMitreGrid();
+}
+
+/* ═══════════════════════════════════════════════
+   SESSION SELECTOR
+═══════════════════════════════════════════════ */
 
 /* ═══════════════════════════════════════════════
    INITIAL STATE SYNC (REST)
@@ -455,16 +639,49 @@ function startClock() {
    INIT
 ═══════════════════════════════════════════════ */
 
+/* ═══════════════════════════════════════════════
+   INITIALIZATION
+═══════════════════════════════════════════════ */
+
 document.addEventListener('DOMContentLoaded', () => {
+    // Tab switching
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const tabName = e.target.dataset.tab;
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            const tab = document.getElementById(tabName);
+            if (tab) tab.classList.add('active');
+            e.target.classList.add('active');
+        });
+    });
+
+    // Logs filtering
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const filter = e.target.dataset.filter;
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            e.target.classList.add('active');
+            if (state.selectedSession) {
+                fetchSessionLogs(state.selectedSession, filter);
+            }
+        });
+    });
+
+    // Session select
+    const sessionSelect = document.getElementById('session-select');
+    if (sessionSelect) {
+        sessionSelect.addEventListener('change', (e) => {
+            selectSession(e.target.value || null);
+        });
+    }
+
+    // MITRE grid init
     buildMitreGrid();
     buildGaugeSegments();
     startClock();
 
-    // Session change → update state filter
-    document.getElementById('session-select').addEventListener('change', (e) => {
-        state.selectedSession = e.target.value || null;
-    });
-
+    // Load initial sessions and connect
     loadInitialSessions();
     connect();
 });
