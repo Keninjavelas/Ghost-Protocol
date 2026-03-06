@@ -56,6 +56,8 @@ const state = {
     reconnectCount: 0,
     selectedSession: null,          // session_id string | null
     sessions: {},            // session_id → { source_ip, username, status }
+    sessionData: {},         // session_id → snapshot data
+    logsCache: {},           // session_id → array of logs
     prevRiskScore: 0,
     cmdCount: 0,
     beaconCount: 0,
@@ -111,6 +113,7 @@ function routeEvent(ev) {
         case 'intent': handleIntent(data); break;
         case 'threat': handleThreat(data); break;
         case 'mitre': handleMitre(data); break;
+        case 'ai_summary': handleAiSummary(data); break;
         case 'attack_timeline': handleAttackTimeline(timestamp, data); break;
         case 'timeline': handleTimeline(timestamp, data); break;
         case 'beacon': handleBeacon(timestamp, data); break;
@@ -170,33 +173,85 @@ function handleCommand(timestamp, data) {
 
 /* intent ──────────────────────────────────────– */
 function handleIntent(data) {
-    const { attacker_type, primary_objective, primary_intent, sophistication_level, sophistication, confidence } = data;
+    const { 
+        attacker_type, 
+        primary_objective, 
+        primary_intent, 
+        sophistication_level, 
+        sophistication, 
+        confidence,
+        reasoning 
+    } = data;
     
     const objective = primary_objective || primary_intent || '—';
     const soph = sophistication_level || sophistication || '—';
+    const conf = parseFloat(confidence) || 0;
     
-    // Update Intelligence Card
+    // Legacy Intelligence Card updates
     const objEl = document.getElementById('intel-objective');
     if (objEl) objEl.textContent = objective;
     
     const sophEl = document.getElementById('intel-soph');
     if (sophEl) sophEl.textContent = soph;
     
-    const conf = parseFloat(confidence) || 0;
     const confPctEl = document.getElementById('intel-conf-pct');
     if (confPctEl) confPctEl.textContent = `${Math.round(conf * 100)}%`;
     
     const badge = document.getElementById('intel-conf');
     if (badge) badge.textContent = `${Math.round(conf * 100)}%`;
+    
+    // NEW: AI Intent Panel updates
+    const aiTypeEl = document.getElementById('ai-attacker-type');
+    if (aiTypeEl) {
+        aiTypeEl.textContent = attacker_type || '—';
+        aiTypeEl.parentElement?.classList.add('updated');
+        setTimeout(() => aiTypeEl.parentElement?.classList.remove('updated'), 600);
+    }
+    
+    const aiObjectiveEl = document.getElementById('ai-primary-objective');
+    if (aiObjectiveEl) {
+        aiObjectiveEl.textContent = objective;
+        aiObjectiveEl.parentElement?.classList.add('updated');
+        setTimeout(() => aiObjectiveEl.parentElement?.classList.remove('updated'), 600);
+    }
+    
+    const aiSophEl = document.getElementById('ai-sophistication');
+    if (aiSophEl) {
+        aiSophEl.textContent = soph;
+        aiSophEl.parentElement?.classList.add('updated');
+        setTimeout(() => aiSophEl.parentElement?.classList.remove('updated'), 600);
+    }
+    
+    const aiConfEl = document.getElementById('ai-intent-confidence');
+    if (aiConfEl) {
+        aiConfEl.textContent = `${Math.round(conf * 100)}%`;
+        aiConfEl.parentElement?.classList.add('updated');
+        setTimeout(() => aiConfEl.parentElement?.classList.remove('updated'), 600);
+    }
+    
+    const aiReasonEl = document.getElementById('ai-intent-reasoning');
+    if (aiReasonEl) {
+        aiReasonEl.textContent = reasoning || '—';
+        aiReasonEl.parentElement?.classList.add('updated');
+        setTimeout(() => aiReasonEl.parentElement?.classList.remove('updated'), 600);
+    }
 }
 
 /* threat ──────────────────────────────────────── */
 function handleThreat(data) {
-    const { risk_score, threat_level } = data;
+    const { 
+        risk_score,
+        score_change,
+        threat_level, 
+        apt_likelihood,
+        reasoning 
+    } = data;
+    
     const score = parseFloat(risk_score) || 0;
     const level = (threat_level || 'LOW').toUpperCase();
+    const change = parseFloat(score_change) || 0;
 
-    // Update Risk Gauge
+    // Legacy Risk Gauge updates
     const scoreEl = document.getElementById('risk-score');
     if (scoreEl) scoreEl.textContent = score.toFixed(0);
     
@@ -224,20 +279,133 @@ function handleThreat(data) {
         }
     }
     state.prevRiskScore = score;
+    
+    // NEW: AI Threat Panel updates
+    const aiScoreEl = document.getElementById('ai-threat-current');
+    if (aiScoreEl) {
+        aiScoreEl.textContent = score.toFixed(0);
+        aiScoreEl.parentElement?.classList.add('updated');
+        setTimeout(() => aiScoreEl.parentElement?.classList.remove('updated'), 600);
+    }
+    
+    const aiChangeEl = document.getElementById('ai-threat-change');
+    if (aiChangeEl) {
+        const changeSign = change > 0 ? '+' : '';
+        const changeClass = change > 0 ? 'positive' : (change < 0 ? 'negative' : 'neutral');
+        aiChangeEl.textContent = `${changeSign}${change.toFixed(1)}`;
+        aiChangeEl.className = `ai-threat-change ${changeClass}`;
+        aiChangeEl.parentElement?.classList.add('updated');
+        setTimeout(() => aiChangeEl.parentElement?.classList.remove('updated'), 600);
+    }
+    
+    const aiLevelEl = document.getElementById('ai-threat-level');
+    if (aiLevelEl) {
+        aiLevelEl.textContent = level;
+        aiLevelEl.className = `ai-threat-level ${level.toLowerCase()}`;
+        aiLevelEl.parentElement?.classList.add('updated');
+        setTimeout(() => aiLevelEl.parentElement?.classList.remove('updated'), 600);
+    }
+    
+    const aiAptEl = document.getElementById('ai-apt-likelihood');
+    if (aiAptEl) {
+        const aptScore = parseFloat(apt_likelihood) || 0;
+        aiAptEl.textContent = `${Math.round(aptScore * 100)}%`;
+        aiAptEl.parentElement?.classList.add('updated');
+        setTimeout(() => aiAptEl.parentElement?.classList.remove('updated'), 600);
+    }
+    
+    const aiReasonEl = document.getElementById('ai-threat-reasoning');
+    if (aiReasonEl) {
+        aiReasonEl.textContent = reasoning || '—';
+        aiReasonEl.parentElement?.classList.add('updated');
+        setTimeout(() => aiReasonEl.parentElement?.classList.remove('updated'), 600);
+    }
 }
 
 /* mitre ───────────────────────────────────────── */
 function handleMitre(data) {
-    const { tactic, technique_id, confidence } = data;
-    const conf = parseFloat(confidence) || 0;
+    // Handle legacy MITRE heat grid (single technique per event)
+    const { tactic, technique_id, confidence, techniques } = data;
+    
+    // If this is the old format (single technique)
+    if (technique_id && tactic) {
+        const conf = parseFloat(confidence) || 0;
 
-    // Accumulate per technique (cumulative, clamped at 3.0)
-    state.mitreHits[technique_id] = Math.min((state.mitreHits[technique_id] || 0) + conf, 3.0);
-    // Accumulate per tactic for cell intensity
-    state.tacticHits[tactic] = Math.min((state.tacticHits[tactic] || 0) + conf, 3.0);
+        // Accumulate per technique (cumulative, clamped at 3.0)
+        state.mitreHits[technique_id] = Math.min((state.mitreHits[technique_id] || 0) + conf, 3.0);
+        // Accumulate per tactic for cell intensity
+        state.tacticHits[tactic] = Math.min((state.tacticHits[tactic] || 0) + conf, 3.0);
 
-    updateMitreCell(tactic);
-    updateMitreCount();
+        updateMitreCell(tactic);
+        updateMitreCount();
+    }
+    
+    // NEW: Populate AI MITRE Panel with techniques list (new format)
+    if (techniques && Array.isArray(techniques)) {
+        const techniquesList = document.getElementById('ai-mitre-techniques-list');
+        if (techniquesList) {
+            // Clear previous items (unless appending)
+            if (techniquesList.children.length === 0 || techniquesList.innerHTML.includes('empty')) {
+                techniquesList.innerHTML = '';
+            }
+            
+            techniques.forEach(tech => {
+                // Check if technique already displayed
+                const existingId = `ai-tech-${tech.id}`;
+                if (document.getElementById(existingId)) return;
+                
+                const item = document.createElement('div');
+                item.id = existingId;
+                item.className = 'ai-technique-item updated';
+                
+                const confidence = Math.round((parseFloat(tech.confidence) || 0) * 100);
+                item.innerHTML = `
+                    <div class="ai-technique-name">${esc(tech.name || tech.id)}</div>
+                    <div class="ai-technique-meta">
+                        <span>${esc(tech.tactic || '—')}</span>
+                        <span>${confidence}% confidence</span>
+                    </div>
+                    ${tech.description ? `<div style="font-size: 10px; color: var(--text-dim); margin-top: 3px;">${esc(tech.description)}</div>` : ''}
+                `;
+                
+                techniquesList.appendChild(item);
+                
+                // Trigger animation
+                setTimeout(() => item.classList.remove('updated'), 600);
+            });
+            
+            // Update techniques count
+            const techCount = document.getElementById('ai-mitre-count');
+            if (techCount) {
+                techCount.textContent = techniquesList.children.length;
+            }
+        }
+    }
+}
+
+/* ai_summary ──────────────────────────────────── */
+function handleAiSummary(data) {
+    const { 
+        narrative,
+        command_context,
+        attacker_profile,
+        primary_goal,
+        threat_level
+    } = data;
+    
+    const summaryNarrativeEl = document.getElementById('ai-summary-narrative');
+    if (summaryNarrativeEl) {
+        summaryNarrativeEl.textContent = narrative || '—';
+        
+        // Style based on threat level if available
+        if (threat_level) {
+            summaryNarrativeEl.className = `ai-summary-narrative ${threat_level.toLowerCase()}`;
+        }
+        
+        // Trigger animation
+        summaryNarrativeEl.parentElement?.classList.add('updated');
+        setTimeout(() => summaryNarrativeEl.parentElement?.classList.remove('updated'), 600);
+    }
 }
 
 /* attack_timeline ─────────────────────────────– */
@@ -540,6 +708,52 @@ function clearDashboard() {
     
     const levelEl = document.getElementById('risk-level-label');
     if (levelEl) levelEl.textContent = 'LOW';
+    
+    // Clear AI Intelligence Panels
+    const aiTypeEl = document.getElementById('ai-attacker-type');
+    if (aiTypeEl) aiTypeEl.textContent = '—';
+    
+    const aiObjEl = document.getElementById('ai-primary-objective');
+    if (aiObjEl) aiObjEl.textContent = '—';
+    
+    const aiSophEl = document.getElementById('ai-sophistication');
+    if (aiSophEl) aiSophEl.textContent = '—';
+    
+    const aiConfEl = document.getElementById('ai-intent-confidence');
+    if (aiConfEl) aiConfEl.textContent = '—';
+    
+    const aiReasonEl = document.getElementById('ai-intent-reasoning');
+    if (aiReasonEl) aiReasonEl.textContent = '—';
+    
+    const aiScoreEl = document.getElementById('ai-threat-current');
+    if (aiScoreEl) aiScoreEl.textContent = '0';
+    
+    const aiChangeEl = document.getElementById('ai-threat-change');
+    if (aiChangeEl) {
+        aiChangeEl.textContent = '—';
+        aiChangeEl.className = 'ai-threat-change neutral';
+    }
+    
+    const aiLevelEl = document.getElementById('ai-threat-level');
+    if (aiLevelEl) {
+        aiLevelEl.textContent = 'LOW';
+        aiLevelEl.className = 'ai-threat-level low';
+    }
+    
+    const aiAptEl = document.getElementById('ai-apt-likelihood');
+    if (aiAptEl) aiAptEl.textContent = '—';
+    
+    const aiThreatReasonEl = document.getElementById('ai-threat-reasoning');
+    if (aiThreatReasonEl) aiThreatReasonEl.textContent = '—';
+    
+    const aiTechListEl = document.getElementById('ai-mitre-techniques-list');
+    if (aiTechListEl) aiTechListEl.innerHTML = '<div style="color: var(--text-dim); font-size: 11px; padding: 8px; text-align: center;">No techniques detected yet.</div>';
+    
+    const aiSummaryEl = document.getElementById('ai-summary-narrative');
+    if (aiSummaryEl) {
+        aiSummaryEl.textContent = '—';
+        aiSummaryEl.className = 'ai-summary-narrative';
+    }
     
     buildMitreGrid();
 }

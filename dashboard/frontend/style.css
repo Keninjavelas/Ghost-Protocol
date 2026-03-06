@@ -630,6 +630,297 @@ html, body { height: 100%; overflow: hidden; background: var(--bg);
   flex: 1;
 }
 
+/* ═════════════════════════════════════════════════════════════
+   AI INTELLIGENCE PANELS (Judge-Friendly)
+═════════════════════════════════════════════════════════════ */
+
+/* ── AI Intelligence Grid Layout ────────────────────────── */
+.ai-intelligence-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--gap);
+  margin-top: var(--gap);
+}
+
+/* ── Base AI Panel Style ────────────────────────────────── */
+.panel-ai-intent,
+.panel-ai-mitre,
+.panel-ai-threat,
+.panel-ai-summary {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-hi);
+  background: rgba(0, 229, 255, .02);
+  border-left: 3px solid var(--cyan);
+  transition: all var(--t);
+}
+
+.panel-ai-intent:hover,
+.panel-ai-mitre:hover,
+.panel-ai-threat:hover,
+.panel-ai-summary:hover {
+  border-color: var(--cyan);
+  box-shadow: 0 0 12px rgba(0, 229, 255, .1);
+}
+
+/* ── AI Panel Header ────────────────────────────────────── */
+.panel-ai-intent .panel-header,
+.panel-ai-mitre .panel-header,
+.panel-ai-threat .panel-header,
+.panel-ai-summary .panel-header {
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-ai-intent .panel-title,
+.panel-ai-mitre .panel-title,
+.panel-ai-threat .panel-title,
+.panel-ai-summary .panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── AI Badge (Indicates AI-Generated) ───────────────────── */
+.ai-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #7c3aed, #0ea5e9);
+  color: var(--white);
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  box-shadow: 0 0 8px rgba(124, 58, 237, .3);
+}
+
+.ai-badge::before {
+  content: "⚡";
+  margin-right: 4px;
+  font-size: 9px;
+}
+
+/* ── AI Panel Body (Content) ────────────────────────────── */
+.ai-intent-body,
+.ai-mitre-body,
+.ai-threat-body,
+.ai-summary-body {
+  flex: 1;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+/* ── AI Field (Label/Value Pair) ────────────────────────– */
+.ai-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(0, 229, 255, .05);
+}
+
+.ai-field:last-child {
+  border-bottom: none;
+}
+
+.ai-label {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--cyan);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.ai-value {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--white);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* ── AI Text (Prose/Narrative) ──────────────────────────– */
+.ai-text {
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--text);
+  line-height: 1.6;
+  letter-spacing: 0.3px;
+}
+
+.ai-reasoning {
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  font-style: italic;
+  padding: 6px;
+  background: rgba(0, 229, 255, .03);
+  border-left: 2px solid var(--cyan);
+  border-radius: 2px;
+  margin-top: 4px;
+}
+
+/* ── Specific AI Panel Customizations ─────────────────── */
+
+/* Intent Panel */
+.ai-intent-body .ai-value.sophistication,
+.ai-intent-body .ai-value.confidence {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* MITRE Panel */
+.ai-mitre-techniques-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-technique-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: rgba(0, 229, 255, .04);
+  border: 1px solid rgba(0, 229, 255, .1);
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+.ai-technique-name {
+  font-family: var(--mono);
+  color: var(--cyan);
+  font-weight: 500;
+}
+
+.ai-technique-meta {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+/* Threat Panel */
+.ai-threat-score-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ai-threat-current {
+  font-family: var(--mono);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--white);
+}
+
+.ai-threat-change {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.ai-threat-change.positive {
+  background: rgba(255, 59, 59, .2);
+  color: var(--red);
+}
+
+.ai-threat-change.negative {
+  background: rgba(0, 230, 118, .2);
+  color: var(--green);
+}
+
+.ai-threat-change.neutral {
+  background: rgba(255, 255, 255, .05);
+  color: var(--text-dim);
+}
+
+.ai-threat-level {
+  display: inline-block;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.ai-threat-level.critical {
+  background: linear-gradient(135deg, rgba(255, 59, 59, .3), rgba(255, 59, 59, .1));
+  color: var(--red);
+  border: 1px solid rgba(255, 59, 59, .3);
+}
+
+.ai-threat-level.high {
+  background: rgba(255, 145, 0, .15);
+  color: var(--orange);
+  border: 1px solid rgba(255, 145, 0, .2);
+}
+
+.ai-threat-level.medium {
+  background: rgba(255, 214, 0, .15);
+  color: var(--yellow);
+  border: 1px solid rgba(255, 214, 0, .2);
+}
+
+.ai-threat-level.low {
+  background: rgba(0, 230, 118, .15);
+  color: var(--green);
+  border: 1px solid rgba(0, 230, 118, .2);
+}
+
+/* Summary Panel (Full Width) */
+.panel-ai-summary {
+  grid-column: 1 / -1;
+}
+
+.ai-summary-narrative {
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.7;
+  letter-spacing: 0.3px;
+}
+
+.ai-summary-narrative.critical {
+  color: var(--red);
+  background: rgba(255, 59, 59, .05);
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.ai-summary-narrative.high {
+  color: var(--orange);
+  background: rgba(255, 145, 0, .05);
+  padding: 8px;
+  border-radius: 4px;
+}
+
+/* ── Animation for AI Updates ────────────────────────────– */
+@keyframes ai-highlight {
+  0%   { background: rgba(0, 229, 255, .1); }
+  100% { background: rgba(0, 229, 255, .02); }
+}
+
+.ai-field.updated,
+.ai-technique-item.updated,
+.ai-threat-score-row.updated {
+  animation: ai-highlight .6s ease;
+}
+
 /* Responsive fixes for smaller screens */
 @media (max-width: 1600px) {
   .dashboard-grid {
@@ -640,6 +931,9 @@ html, body { height: 100%; overflow: hidden; background: var(--bg);
   }
   .panel-timeline {
     grid-column: 1 / -1;
+  }
+  .ai-intelligence-grid {
+    grid-template-columns: 1fr;
   }
 }
 

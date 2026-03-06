@@ -91,6 +91,97 @@
       </div>
     </section>
 
+    <!-- ═════════════════  AI INTELLIGENCE PANELS  ═════════════════ -->
+    <div class="ai-intelligence-grid">
+
+      <!-- AI Intent Inference -->
+      <section class="panel panel-ai-intent">
+        <div class="panel-header">
+          <span class="panel-title">🧠 AI INTENT INFERENCE</span>
+          <span class="panel-badge ai-badge" title="AI-Generated Intelligence">AI</span>
+        </div>
+        <div class="ai-intent-body">
+          <div class="ai-field">
+            <span class="ai-label">Attacker Type:</span>
+            <span class="ai-value" id="ai-attacker-type">—</span>
+          </div>
+          <div class="ai-field">
+            <span class="ai-label">Primary Objective:</span>
+            <span class="ai-value" id="ai-primary-objective">—</span>
+          </div>
+          <div class="ai-field">
+            <span class="ai-label">Sophistication:</span>
+            <span class="ai-value" id="ai-sophistication">—</span>
+          </div>
+          <div class="ai-field">
+            <span class="ai-label">Confidence:</span>
+            <span class="ai-value" id="ai-intent-confidence">—</span>
+          </div>
+          <div class="ai-reasoning">
+            <span class="ai-label">AI Reasoning:</span>
+            <div class="ai-text" id="ai-intent-reasoning">No inference data yet.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- AI MITRE ATT&CK Mapping -->
+      <section class="panel panel-ai-mitre">
+        <div class="panel-header">
+          <span class="panel-title">⚔ MITRE ATT&CK MAPPING</span>
+          <span class="panel-badge ai-badge" title="AI-Generated Intelligence">AI</span>
+        </div>
+        <div class="ai-mitre-body">
+          <div id="ai-mitre-techniques-list">
+            <div class="empty-state">No MITRE techniques detected yet.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- AI Threat Analysis -->
+      <section class="panel panel-ai-threat">
+        <div class="panel-header">
+          <span class="panel-title">⚠ THREAT SCORE ANALYSIS</span>
+          <span class="panel-badge ai-badge" title="AI-Generated Intelligence">AI</span>
+        </div>
+        <div class="ai-threat-body">
+          <div class="ai-field">
+            <span class="ai-label">Current Score:</span>
+            <span class="ai-value" id="ai-threat-current">0 / 100</span>
+          </div>
+          <div class="ai-field">
+            <span class="ai-label">Score Change:</span>
+            <span class="ai-value ai-score-change" id="ai-threat-change">—</span>
+          </div>
+          <div class="ai-field">
+            <span class="ai-label">Threat Level:</span>
+            <span class="ai-value" id="ai-threat-level">UNKNOWN</span>
+          </div>
+          <div class="ai-field">
+            <span class="ai-label">APT Likelihood:</span>
+            <span class="ai-value" id="ai-apt-likelihood">—</span>
+          </div>
+          <div class="ai-reasoning">
+            <span class="ai-label">Analysis:</span>
+            <div class="ai-text" id="ai-threat-reasoning">No threat analysis available.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- AI Attack Summary/Narrative -->
+      <section class="panel panel-ai-summary">
+        <div class="panel-header">
+          <span class="panel-title">📋 AI ATTACK SUMMARY</span>
+          <span class="panel-badge ai-badge" title="AI-Generated Intelligence">AI</span>
+        </div>
+        <div class="ai-summary-body">
+          <div class="ai-text" id="ai-summary-narrative">
+            <div class="empty-state">Waiting for AI analysis…</div>
+          </div>
+        </div>
+      </section>
+
+    </div><!-- /ai-intelligence-grid -->
+
     <!-- SECTION 3-5: Timeline, Intelligence, Risk (3-column grid) -->
     <div class="dashboard-grid">
       

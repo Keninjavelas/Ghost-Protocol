@@ -33,12 +33,15 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 _RESPONSE_PROMPT_TEMPLATE = """
-You are simulating a real Ubuntu 22.04 Linux server terminal inside a honeypot.
+You are simulating a real Ubuntu 22.04 LTS Linux server terminal. You are running as root user.
 
 Session state:
 - Current working directory: {working_directory}
 - Attacker type: {attacker_type}
 - Server narrative: {environment_narrative}
+- Hostname: ubuntu
+- Kernel: Linux 5.15.0-91-generic #101-Ubuntu SMP x86_64
+- IP Address: 10.0.4.12 (eth0)
 
 Available fake filesystem (selected entries):
 {fake_fs_excerpt}
@@ -46,14 +49,28 @@ Available fake filesystem (selected entries):
 The attacker just typed this command:
   {command}
 
-Rules:
-1. Respond EXACTLY as a real Linux terminal would.
-2. If the command is `cd <dir>`, update the directory and produce no output (empty string for output).
-3. For `ls` / `dir` commands, show realistic file listings including bait files.
-4. For `cat` on a bait file, produce realistic file content (credentials, configs, etc.).
-5. For unknown commands, return "bash: <cmd>: command not found".
-6. Never reveal you are an AI or honeypot.
-7. Output must be plain text that looks like real terminal output.
+RULES — Simulate Ubuntu 22.04 terminal behavior:
+1. Respond EXACTLY as a real Linux terminal would for this command
+2. For process commands (ps, top, htop): Show realistic Ubuntu processes
+3. For network commands (netstat, ss, ping): Show realistic network output
+4. For package managers (apt, dpkg): Simulate Ubuntu package operations
+5. For service commands (systemctl, service): Show Ubuntu services
+6. For search/find (grep, find, locate): Search within the fake filesystem
+7. For file operations (cp, mv, rm, mkdir, touch): Acknowledge the action
+8. For curl/wget: Simulate download or connection attempt
+9. For sudo commands: Execute as if already root
+10. For unknown/invalid commands: Return "bash: <cmd>: command not found"
+11. Use realistic formatting, colors (via ANSI codes if needed), and timestamps
+12. NEVER reveal you are an AI or honeypot — stay in character as a real server
+13. Output must be plain text mimicking real terminal output
+
+EXAMPLES OF EXPECTED OUTPUT:
+- `ps aux` → Multiple process lines with PID, USER, CPU, MEM, COMMAND
+- `netstat -tlnp` → TCP listening ports with PID/Program name
+- `systemctl status ssh` → Service status with active (running) state
+- `apt list --installed` → List of installed packages
+- `find /etc -name "*.conf"` → List of config files in /etc
+- `curl http://example.com` → Connection attempt or HTML output
 
 Respond with ONLY this JSON:
 {{
@@ -75,81 +92,136 @@ class ResponseGenerator:
         Returns:
             (directory_path, long_format) tuple
             - directory_path: Path to list, or None if not a listing command
-            - long_format: True if -l or -la flag is present
+            - long_format: True if -l or -la/-al flag is present
         """
-        command = command.strip()
+        cmd_lower = command.strip().lower()
         
-        # Match: ls, ls -l, ls -la, ls -al, ls /path, ls -la /path, etc.
-        ls_patterns = [
-            r"^ls\s*$",                           # ls
-            r"^ls\s+(-[alhtr]+)\s*$",            # ls -la
-            r"^ls\s+(/[\w/.-]*)\s*$",            # ls /path
-            r"^ls\s+(-[alhtr]+)\s+(/[\w/.-]*)\s*$",  # ls -la /path
-            r"^ls\s+(/[\w/.-]*)\s+(-[alhtr]+)\s*$",  # ls /path -la
-        ]
+        # Quick check: does it start with ls or dir?
+        if not (cmd_lower.startswith("ls") or cmd_lower.startswith("dir")):
+            return (None, False)
         
-        for pattern in ls_patterns:
-            match = re.match(pattern, command)
-            if match:
-                groups = match.groups()
-                # Determine flags and path
-                flags = ""
-                path = None
-                
-                for group in groups if groups else []:
-                    if group and group.startswith("-"):
-                        flags = group
-                    elif group and group.startswith("/"):
-                        path = group
-                
-                # Check for long format flags
-                long_format = "l" in flags if flags else False
-                
-                return (path, long_format)
+        # Extract the command word
+        parts = cmd_lower.split()
+        if not parts or parts[0] not in ["ls", "dir"]:
+            return (None, False)
         
-        return (None, False)
+        # Parse flags and path
+        flags = ""
+        path = None
+        long_format = False
+        
+        for part in parts[1:]:
+            if part.startswith("-"):
+                flags += part
+            elif not part.startswith("-"):
+                # This is a path
+                path = part
+                break
+        
+        # Check for long format flags (-l, -la, -al)
+        long_format = "l" in flags.lower()
+        
+        return (path, long_format)
 
     def _detect_file_access(self, command: str) -> str | None:
         """
         Detect if command is attempting to read a file.
         Returns the file path if detected, None otherwise.
         
-        Patterns: cat, less, more, head, tail, view, strings, etc.
+        Patterns: cat, less, more, head, tail, view, strings, grep, etc.
         """
-        # Common file reading commands
-        patterns = [
-            r"^cat\s+(.+?)(?:\s|$)",
-            r"^less\s+(.+?)(?:\s|$)",
-            r"^more\s+(.+?)(?:\s|$)",
-            r"^head\s+(?:-n\s+\d+\s+)?(.+?)(?:\s|$)",
-            r"^tail\s+(?:-n\s+\d+\s+)?(.+?)(?:\s|$)",
-            r"^view\s+(.+?)(?:\s|$)",
-            r"^strings\s+(.+?)(?:\s|$)",
-            r"^grep\s+.*\s+(.+?)(?:\s|$)",
-        ]
+        cmd_lower = command.strip().lower()
         
-        for pattern in patterns:
-            match = re.search(pattern, command.strip())
-            if match:
-                file_path = match.group(1).strip()
-                # Remove quotes if present
-                file_path = file_path.strip('"').strip("'")
-                return file_path
+        # Extract command and arguments
+        parts = cmd_lower.split(None, 1)  # Split into command and rest
+        if not parts:
+            return None
+        
+        cmd_word = parts[0]
+        args = parts[1] if len(parts) > 1 else ""
+        
+        # Commands that read files
+        if cmd_word not in ["cat", "less", "more", "head", "tail", "view", "strings", "grep", "grep"]:
+            return None
+        
+        if not args:
+            return None
+        
+        # For grep: grep "pattern" file
+        if cmd_word == "grep":
+            # Extract the last word as the filename (simplified)
+            arg_parts = args.split()
+            if len(arg_parts) >= 2:
+                # Assume last part is the file
+                file_path = arg_parts[-1].strip("'\"")
+                return file_path if file_path and not file_path.startswith("-") else None
+        
+        # For head/tail: head -n 10 file or head file
+        if cmd_word in ["head", "tail"]:
+            arg_parts = args.split()
+            # Find the filename (not a flag)
+            for arg in arg_parts:
+                if not arg.startswith("-") and not arg.isdigit():
+                    return arg.strip("'\"")
+            return None
+        
+        # For cat, less, more, view, strings: just take first argument
+        arg_parts = args.split(None, 1)  # Split first arg from rest
+        if arg_parts:
+            file_path = arg_parts[0].strip("'\"")
+            return file_path if file_path and not file_path.startswith("-") else None
         
         return None
+
+    def _normalize_command(self, command: str) -> tuple[str, list[str], list[str]]:
+        """
+        Normalize and parse command into components.
+        
+        Returns:
+            (command_word, flags, arguments) tuple
+        
+        Example:
+            "ls -la /etc" → ("ls", ["-l", "-a"], ["/etc"])
+        """
+        parts = command.strip().split()
+        if not parts:
+            return ("", [], [])
+        
+        cmd_word = parts[0].lower()
+        flags = []
+        arguments = []
+        
+        for part in parts[1:]:
+            if part.startswith("-"):
+                # Split combined flags: -la → -l, -a
+                if part.startswith("--"):
+                    flags.append(part)  # Long flag like --help
+                else:
+                    for char in part[1:]:
+                        flags.append(f"-{char}")
+            else:
+                arguments.append(part)
+        
+        return (cmd_word, flags, arguments)
 
     def _handle_builtin_commands(self, command: str, session_state: "SessionState") -> str | None:
         """
         Handle common Linux builtin commands with deterministic outputs.
-        Returns None if not a builtin command, allowing fallback to LLM.
+        Returns None if not a builtin command, allowing fallback to other handlers.
         
         Commands handled:
         - pwd: Print working directory
         - whoami: Current user (always root in honeypot)
-        - uname -a: System information (Ubuntu 22.04 LTS identity)
-        - cd: Change directory (updates session state, returns empty string)
+        - uname: System information (Ubuntu 22.04 LTS identity)
+        - hostname: Server hostname
+        - id: User identity
+        - cd: Change directory
+        - ip a / ifconfig: Network interface info
+        - echo: Print arguments
+        - date: Current date/time
+        - uptime: System uptime
         """
-        cmd = command.strip()
+        cmd = command.strip().lower()
         
         # pwd - print working directory
         if cmd == "pwd":
@@ -159,16 +231,93 @@ class ResponseGenerator:
         if cmd == "whoami":
             return "root"
         
-        # uname -a - system information
-        if cmd in ["uname -a", "uname"]:
-            # Consistent Ubuntu 22.04 LTS server identity
-            return "Linux ip-10-0-4-12 5.15.0-91-generic #101-Ubuntu SMP Tue Nov 14 13:30:08 UTC 2023 x86_64 x86_64 x86_64 GNU/Linux"
+        # hostname - server hostname
+        if cmd == "hostname":
+            return "ubuntu"
         
-        # cd - change directory
-        if cmd.startswith("cd "):
-            target = cmd[3:].strip()
+        # id - user identity (root)
+        if cmd == "id":
+            return "uid=0(root) gid=0(root) groups=0(root)"
+        
+        # uname - system information (Ubuntu kernel)
+        if cmd.startswith("uname"):
+            if cmd == "uname" or cmd == "uname -s":
+                return "Linux"
+            elif cmd == "uname -r":
+                return "5.15.0-91-generic"
+            elif cmd == "uname -n":
+                return "ubuntu"
+            elif cmd == "uname -m":
+                return "x86_64"
+            elif cmd == "uname -o":
+                return "GNU/Linux"
+            else:
+                # uname -a (all info)
+                return "Linux ubuntu 5.15.0-91-generic #101-Ubuntu SMP Tue Nov 14 13:30:08 UTC 2023 x86_64 x86_64 x86_64 GNU/Linux"
+        
+        # ip a / ip addr - network interface info
+        if cmd in ["ip a", "ip addr", "ip address", "ip address show", "ip a show"]:
+            return """1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 9001 qdisc fq_codel state UP group default qlen 1000
+    link/ether 02:42:ac:11:00:02 brd ff:ff:ff:ff:ff:ff
+    inet 10.0.4.12/24 brd 10.0.4.255 scope global dynamic eth0
+       valid_lft 3467sec preferred_lft 3467sec
+    inet6 fe80::42:acff:fe11:2/64 scope link 
+       valid_lft forever preferred_lft forever"""
+        
+        # ifconfig - network interface info (legacy)
+        if cmd == "ifconfig":
+            return """eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 9001
+        inet 10.0.4.12  netmask 255.255.255.0  broadcast 10.0.4.255
+        inet6 fe80::42:acff:fe11:2  prefixlen 64  scopeid 0x20<link>
+        ether 02:42:ac:11:00:02  txqueuelen 1000  (Ethernet)
+        RX packets 1245  bytes 156324 (156.3 KB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 987  bytes 98765 (98.7 KB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
+        inet 127.0.0.1  netmask 255.0.0.0
+        inet6 ::1  prefixlen 128  scopeid 0x10<host>
+        loop  txqueuelen 1000  (Local Loopback)
+        RX packets 0  bytes 0 (0.0 B)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 0  bytes 0 (0.0 B)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0"""
+        
+        # echo - print arguments
+        if cmd.startswith("echo"):
+            # Extract the text after "echo "
+            text = command[5:].strip() if len(command) > 5 else ""
+            # Remove quotes if present
+            if text.startswith('"') and text.endswith('"'):
+                text = text[1:-1]
+            elif text.startswith("'") and text.endswith("'"):
+                text = text[1:-1]
+            return text
+        
+        # date - current date/time (static for consistency)
+        if cmd == "date":
+            return "Thu Mar  6 14:23:15 UTC 2026"
+        
+        # uptime - system uptime
+        if cmd == "uptime":
+            return " 14:23:15 up 7 days, 3:42,  1 user,  load average: 0.08, 0.12, 0.09"
+        
+        # cd - change directory (original working directory update logic)
+        if cmd.startswith("cd"):
+            # Use original command for path extraction (preserve case)
+            if command.strip() == "cd" or command.strip() == "cd ~":
+                session_state.working_directory = "/root"
+                return ""
             
-            # Handle special cases
+            # Extract target directory
+            target = command[2:].strip()
             if not target or target == "~":
                 session_state.working_directory = "/root"
                 return ""
@@ -186,28 +335,98 @@ class ResponseGenerator:
             if target == "..":
                 # Go up one directory
                 if session_state.working_directory == "/":
-                    return ""  # Already at root
+                    return ""
                 parent = "/".join(session_state.working_directory.rstrip("/").split("/")[:-1])
                 session_state.working_directory = parent if parent else "/"
                 return ""
             
             # Relative subdirectory
-            new_path = f"{session_state.working_directory.rstrip('/')}/{target}"
+            base = session_state.working_directory.rstrip("/")
+            new_path = f"{base}/{target}"
             if is_directory(new_path):
                 session_state.working_directory = new_path
                 return ""
             else:
                 return f"bash: cd: {target}: No such file or directory"
         
-        # hostname - server hostname
-        if cmd == "hostname":
-            return "ip-10-0-4-12"
-        
-        # id - user identity
-        if cmd == "id":
-            return "uid=0(root) gid=0(root) groups=0(root)"
-        
         # Not a builtin command
+        return None
+
+    def _generate_directory_listing(
+        self,
+        target_dir: str,
+        long_format: bool,
+        session_state: "SessionState",
+    ) -> str:
+        """
+        Generate a directory listing for ls command.
+        Provides fallback behavior if bait_files functions fail.
+        """
+        try:
+            # Try to use the bait_files function
+            listing = format_directory_listing(target_dir, long_format)
+            if listing:
+                return listing
+        except Exception as exc:
+            log.debug(f"format_directory_listing failed: {exc}")
+        
+        # Fallback: generate basic listing from session_state.fake_fs
+        entries = []
+        for path, metadata in session_state.fake_fs.items():
+            # Check if this file is in the target directory
+            if path.startswith(target_dir.rstrip("/")):
+                # Extract just the filename
+                rel_path = path[len(target_dir.rstrip("")):]
+                if rel_path.startswith("/"):
+                    rel_path = rel_path[1:]
+                
+                # Only include direct children (not nested)
+                if "/" not in rel_path and rel_path:
+                    if long_format:
+                        # Long format: permissions owner size timestamp name
+                        content_hint = metadata.get("content_hint", "")
+                        size = len(content_hint.encode())
+                        is_dir = metadata.get("is_directory", False)
+                        permissions = "drwxr-xr-x" if is_dir else "-rw-r--r--"
+                        entries.append(f"{permissions} 1 root root {size:>6} Mar  6 10:15 {rel_path}")
+                    else:
+                        # Short format: just names
+                        entries.append(rel_path)
+        
+        # If no entries found, check if directory exists
+        if not entries:
+            if is_directory(target_dir):
+                return ""  # Empty directory
+            else:
+                return f"ls: cannot access '{target_dir}': No such file or directory"
+        
+        # Format output
+        if long_format:
+            return "\n".join(entries)
+        else:
+            # Column format for short listing
+            return "  ".join(entries) if entries else ""
+
+    def _read_file_content(self, file_path: str, session_state: "SessionState") -> str | None:
+        """
+        Read file content from bait_files or session_state.fake_fs.
+        Returns None if file not found.
+        """
+        # Try bait_files function first
+        try:
+            content = get_bait_content(file_path)
+            if content:
+                return content
+        except Exception as exc:
+            log.debug(f"get_bait_content failed for {file_path}: {exc}")
+        
+        # Fallback: check session_state.fake_fs
+        if file_path in session_state.fake_fs:
+            metadata = session_state.fake_fs[file_path]
+            content = metadata.get("content", metadata.get("content_hint", ""))
+            return content if content else ""
+        
+        # File not found
         return None
 
     async def generate(
@@ -216,30 +435,46 @@ class ResponseGenerator:
         command: str,
         env_context: dict[str, Any],
     ) -> str:
-        """Generate a terminal response string for the given command."""
+        """
+        Generate a terminal response string for the given command.
+        
+        Hybrid Command Handling Model:
+        
+        Priority order (deterministic before LLM):
+        1. Built-in commands (pwd, whoami, cd, hostname, uname, id, ip, ifconfig, echo, date, uptime)
+        2. Directory listing (ls, dir with flags)
+        3. File access (cat, less, more, head, tail, view, strings, grep)
+        4. AI pipeline for advanced commands (ps, netstat, systemctl, apt, find, curl, etc.)
+        
+        Safety: All commands are simulated. Nothing executes on host system.
+        Integration: Does not interfere with intent inference, MITRE mapping, threat scoring, or telemetry.
+        """
+        
+        # Normalize command for better parsing
+        command = command.strip()
+        if not command:
+            return ""
 
-        # ── Builtin Command Handler ───────────────────────────────────────────
-        # Handle common Linux commands deterministically for demo reliability
+        # ── 1. BUILTIN COMMAND HANDLER ─────────────────────────────────────────
+        # Handle common Linux commands deterministically
         builtin_output = self._handle_builtin_commands(command, session_state)
         if builtin_output is not None:
-            log.debug(
-                "builtin_command_handled",
+            log.info(
+                "builtin_command_executed",
                 session_id=str(session_state.session_id),
-                command=command,
+                command=command.split()[0],
             )
             return builtin_output
 
-        # ── Directory Listing Detection ────────────────────────────────────────
-        # Handle ls commands with consistent filesystem display for demo reliability
+        # ── 2. DIRECTORY LISTING (ls/dir) ──────────────────────────────────────
         list_path, long_format = self._detect_directory_listing(command)
         if list_path is not None:
             # Use current directory if no path specified
             target_dir = list_path if list_path else session_state.working_directory
             
-            # Generate directory listing
-            listing = format_directory_listing(target_dir, long_format)
-            
-            if listing:
+            try:
+                # Generate directory listing
+                listing = self._generate_directory_listing(target_dir, long_format, session_state)
                 log.info(
                     "directory_listed",
                     session_id=str(session_state.session_id),
@@ -247,59 +482,83 @@ class ResponseGenerator:
                     long_format=long_format,
                 )
                 return listing
-            else:
-                # Empty directory or doesn't exist
-                if is_directory(target_dir):
-                    return ""  # Empty directory
-                else:
-                    return f"ls: cannot access '{target_dir}': No such file or directory"
-
-        # ── Credential Theft Trap Detection ────────────────────────────────────
-        # Detect if attacker is trying to read a sensitive file
-        accessed_file = self._detect_file_access(command)
-        credential_access_detected = False
-        mitre_technique = None
-        
-        if accessed_file:
-            # Normalize path (handle relative paths in simple way)
-            if not accessed_file.startswith("/"):
-                accessed_file = f"{session_state.working_directory}/{accessed_file}"
-            
-            # Check if this is a sensitive bait file
-            if is_sensitive_file(accessed_file):
-                credential_access_detected = True
-                mitre_technique = get_mitre_technique_for_file(accessed_file)
-                
+            except Exception as exc:
                 log.warning(
-                    "credential_file_accessed",
+                    "directory_listing_error",
                     session_id=str(session_state.session_id),
-                    file=accessed_file,
-                    command=command,
-                    mitre_technique=mitre_technique,
+                    directory=target_dir,
+                    error=str(exc),
                 )
+                return f"ls: cannot access '{target_dir}': No such file or directory"
+
+        # ── 3. FILE ACCESS HANDLER (cat, less, more, head, tail, view, strings) ──
+        accessed_file = self._detect_file_access(command)
+        if accessed_file:
+            # Normalize path (handle relative paths)
+            if not accessed_file.startswith("/"):
+                file_path = f"{session_state.working_directory}/{accessed_file}"
+            else:
+                file_path = accessed_file
+            
+            # Clean up path (remove double slashes)
+            file_path = file_path.replace("//", "/")
+            
+            try:
+                # Try to read the file
+                content = self._read_file_content(file_path, session_state)
                 
-                # Return realistic bait content directly (bypass LLM for consistency)
-                bait_content = get_bait_content(accessed_file)
-                if bait_content:
-                    # Mark canary as accessed for tracking
-                    if accessed_file not in session_state.deployed_canaries:
-                        session_state.deployed_canaries.append(accessed_file)
+                if content is not None:
+                    # File found and readable
+                    log.info(
+                        "file_accessed",
+                        session_id=str(session_state.session_id),
+                        file=file_path,
+                        command=command.split()[0],
+                    )
                     
-                    # Store credential access event in session state for telemetry
-                    if not hasattr(session_state, 'credential_accesses'):
-                        session_state.credential_accesses = []  # type: ignore[attr-defined]
+                    # Check if this is a sensitive bait file
+                    if is_sensitive_file(file_path):
+                        mitre_technique = get_mitre_technique_for_file(file_path)
+                        log.warning(
+                            "credential_file_accessed",
+                            session_id=str(session_state.session_id),
+                            file=file_path,
+                            command=command,
+                            mitre_technique=mitre_technique,
+                        )
+                        
+                        # Track canary access
+                        if file_path not in session_state.deployed_canaries:
+                            session_state.deployed_canaries.append(file_path)
+                        
+                        # Track credential access event
+                        if not hasattr(session_state, 'credential_accesses'):
+                            session_state.credential_accesses = []  # type: ignore[attr-defined]
+                        
+                        session_state.credential_accesses.append({  # type: ignore[attr-defined]
+                            "file": file_path,
+                            "command": command,
+                            "mitre_technique": mitre_technique,
+                        })
                     
-                    session_state.credential_accesses.append({  # type: ignore[attr-defined]
-                        "file": accessed_file,
-                        "command": command,
-                        "mitre_technique": mitre_technique,
-                    })
-                    
-                    return bait_content
+                    return content
+                else:
+                    # File not found
+                    return f"cat: {file_path}: No such file or directory"
+            
+            except Exception as exc:
+                log.warning(
+                    "file_access_error",
+                    session_id=str(session_state.session_id),
+                    file=file_path,
+                    error=str(exc),
+                )
+                return f"cat: {file_path}: No such file or directory"
 
-        # ── Standard LLM Response Generation ───────────────────────────────────
-
-        # Build a short excerpt of fake_fs for the prompt
+        # ── 4. AI PIPELINE FOR UNKNOWN COMMANDS ────────────────────────────────
+        # Only route to LLM if the command is not a recognized deterministic type
+        
+        # Build a short excerpt of fake_fs for the LLM prompt
         fs_items = list(session_state.fake_fs.items())[:10]
         fake_fs_text = "\n".join(
             f"  {path}: {meta.get('content_hint', '')}"

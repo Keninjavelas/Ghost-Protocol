@@ -19,6 +19,13 @@ import structlog
 
 from config.settings import settings
 from database.db import close_db, init_db
+from gateway.ssh_presentation import (
+    generate_hostname_from_ip,
+    generate_ubuntu_banner,
+    format_last_login,
+    handle_builtin_command,
+    render_prompt,
+)
 from interception.command_interceptor import CommandInterceptor
 from sandbox.docker_manager import DockerManager
 from session.session_manager import SessionManager
@@ -33,6 +40,13 @@ class GhostSSHSession(asyncssh.SSHServerSession):   # type: ignore[misc]
     """
     Handles one attacker connection.
     Each command typed by the attacker is intercepted and routed to the AI.
+    
+    Presents a realistic Ubuntu 22.04 SSH experience with:
+      - Authentic login banner with system information
+      - Realistic hostname (e.g., ip-10-0-4-12)
+      - Last login tracking
+      - Accurate prompt rendering (root@hostname:path#)
+      - Built-in command support (whoami, hostname, pwd, uname -a)
     """
 
     def __init__(
@@ -53,6 +67,10 @@ class GhostSSHSession(asyncssh.SSHServerSession):   # type: ignore[misc]
         self._chan: Optional[asyncssh.SSHServerChannel] = None
         self._buf: str = ""
         self._loop = asyncio.get_event_loop()
+        
+        # SSH presentation state
+        self._hostname = generate_hostname_from_ip(peer_ip)
+        self._login_time = datetime.now(timezone.utc)
 
     def shell_requested(self) -> bool:
         """Accept the attacker's shell request."""
@@ -71,13 +89,18 @@ class GhostSSHSession(asyncssh.SSHServerSession):   # type: ignore[misc]
             "ssh_session_started",
             session_id=str(self._session_state.session_id),
             peer_ip=self._peer_ip,
+            hostname=self._hostname,
         )
-        # Show a realistic banner
-        self._send(
-            f"\r\nWelcome to Ubuntu 22.04.3 LTS (GNU/Linux 5.15.0-91-generic x86_64)\r\n\r\n"
-            f" * Documentation:  https://help.ubuntu.com\r\n\r\n"
-            f"Last login: {datetime.now(timezone.utc).strftime('%a %b %d %H:%M:%S %Z %Y')}\r\n\r\n"
-        )
+        
+        # Display Ubuntu login banner
+        banner = generate_ubuntu_banner(self._hostname)
+        self._send(banner)
+        
+        # Display last login message
+        last_login = format_last_login(self._peer_ip)
+        self._send(last_login + "\r\n\r\n")
+        
+        # Show initial prompt
         self._prompt()
 
     def _send(self, data: str) -> None:
@@ -85,8 +108,9 @@ class GhostSSHSession(asyncssh.SSHServerSession):   # type: ignore[misc]
             self._chan.write(data)
 
     def _prompt(self) -> None:
+        """Render and display the shell prompt with hostname and working directory."""
         wd = "~" if self._session_state is None else self._session_state.working_directory
-        prompt = f"\033[01;32mroot@ubuntu\033[00m:\033[01;34m{wd}\033[00m# "
+        prompt = render_prompt(self._hostname, wd)
         self._send(prompt)
 
     def data_received(self, data: str, datatype: object) -> None:
@@ -118,16 +142,48 @@ class GhostSSHSession(asyncssh.SSHServerSession):   # type: ignore[misc]
             return
 
         sid = self._session_state.session_id
-        await self._session_manager.append_command(sid, command)
+        
+        try:
+            await self._session_manager.append_command(sid, command)
+        except Exception as exc:
+            log.warning("command_append_failed", error=str(exc), session_id=str(sid))
 
+        # Check for built-in commands (whoami, hostname, pwd, uname -a)
+        builtin_response = handle_builtin_command(
+            command,
+            self._hostname,
+            self._session_state.working_directory,
+        )
+        
+        if builtin_response is not None:
+            # Built-in command: return immediately without AI processing
+            log.info(
+                "builtin_command_executed",
+                session_id=str(sid),
+                command=command,
+                hostname=self._hostname,
+            )
+            self._send(builtin_response.rstrip("\n") + "\r\n")
+            self._prompt()
+            return
+
+        # Route to AI pipeline for intelligent response
         try:
             response = await self._interceptor.process(
                 session_state=self._session_state,
                 command=command,
             )
         except Exception as exc:
-            log.warning("command_processing_error", error=str(exc), command=command)
-            response = f"bash: {command.split()[0]}: command not found"
+            log.error(
+                "command_processing_error",
+                error=str(exc),
+                error_type=type(exc).__name__,
+                command=command,
+                session_id=str(sid),
+            )
+            # Provide graceful fallback
+            cmd_name = command.split()[0] if command.split() else "command"
+            response = f"bash: {cmd_name}: command not found"
 
         self._send(response.rstrip("\n") + "\r\n")
         self._prompt()
