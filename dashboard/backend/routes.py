@@ -785,8 +785,6 @@ def create_dashboard_router(
             from ai_core.mitre_mapper import MitreMapper
             from ai_core.threat_scorer import ThreatScorer
             from ai_core.response_generator import ResponseGenerator
-            from config.settings import settings
-            
             # Create temporary instances for demo execution
             llm = LLMClient()
             
@@ -844,7 +842,7 @@ def create_dashboard_router(
                         "session",
                         str(sid),
                         {
-                            "action": "ended",
+                            "action": "closed",
                             "reason": "demo_completed",
                         },
                     )

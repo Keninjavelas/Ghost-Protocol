@@ -40,7 +40,9 @@ const TACTIC_SHORT = {
     'Impact': 'Impact',
 };
 
-const WS_URL = `ws://${location.host}/ws`;
+const WS_PROTOCOL = location.protocol === 'https:' ? 'wss' : 'ws';
+const WS_HOST = location.host || 'localhost:8000';
+const WS_URL = `${WS_PROTOCOL}://${WS_HOST}/ws`;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const MAX_TERMINAL_ENTRIES = 200;
 const MAX_TIMELINE_ENTRIES = 100;
@@ -529,6 +531,7 @@ function heatClass(score) {
 
 function buildGaugeSegments() {
     const wrap = document.getElementById('gauge-segments');
+    if (!wrap) return;
     for (let i = 0; i < 10; i++) {
         const s = document.createElement('div');
         s.className = 'gs';
@@ -869,11 +872,16 @@ async function loadInitialSessions() {
    DEMO MODE
 ═══════════════════════════════════════════════ */
 
-async function runDemo() {
-    const btn = document.getElementById('demo-btn');
+async function runDemo(buttonId = 'demo-btn') {
+    const btn = document.getElementById(buttonId);
+    const companionBtn = buttonId === 'demo-btn' ? document.getElementById('demo-btn-top') : document.getElementById('demo-btn');
+    if (!btn) return;
     const originalText = btn.textContent;
     btn.textContent = '⏳ Running Demo...';
     btn.disabled = true;
+    if (companionBtn) {
+        companionBtn.disabled = true;
+    }
     
     try {
         // Call the new full demo script endpoint
@@ -906,9 +914,10 @@ async function runDemo() {
                 displayIntelligenceReport(result.report, result.session_id);
             }
             
-            // Refresh the session list
+            // Refresh sessions and auto-focus the demo session in the UI.
             setTimeout(() => {
-                fetchAndPopulateSessions();
+                loadInitialSessions();
+                selectSession(result.session_id);
             }, 1000);
             
         } else {
@@ -933,6 +942,9 @@ async function runDemo() {
         setTimeout(() => {
             btn.textContent = originalText;
             btn.disabled = false;
+            if (companionBtn) {
+                companionBtn.disabled = false;
+            }
         }, 5000);
     }
 }
@@ -1048,7 +1060,7 @@ function downloadReport(sessionId) {
 function setLive(online) {
     const el = document.getElementById('live-indicator');
     const text = document.getElementById('live-text');
-    el.className = 'live-indicator ' + (online ? 'live' : 'offline');
+    el.className = 'live-indicator ' + (online ? 'online' : 'offline');
     text.textContent = online ? 'LIVE' : 'OFFLINE';
 }
 
@@ -1093,6 +1105,9 @@ function startClock() {
 ═══════════════════════════════════════════════ */
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Connect early so live updates can start even if some optional UI init fails.
+    connect();
+
     // Tab switching
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
@@ -1132,7 +1147,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Load initial sessions and connect
     loadInitialSessions();
-    connect();
 
     // VPN security polling
     fetchVPNSecurityStatus();
