@@ -26,6 +26,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import Response
 
 from config.settings import settings
 from database.db import close_db, init_db
@@ -69,6 +70,18 @@ _vpn_security: Any | None = None
 _ssh_server_handle: asyncio.Task | None = None
 
 _FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+
+
+# ── Custom StaticFiles with Cache-Busting Headers ──────────────────────────────
+class NoCacheStaticFiles(StaticFiles):
+    """StaticFiles subclass that adds cache-busting headers to all responses."""
+    
+    async def get_response(self, path: str, scope) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
 
 
 # ── Network Defense Callbacks ──────────────────────────────────────────────────
@@ -629,14 +642,29 @@ def create_app() -> FastAPI:
         """Suppress favicon 404 errors."""
         return {}
 
+    @app.get("/test", include_in_schema=False)
+    async def test_page() -> dict:
+        """Simple test endpoint to verify connectivity."""
+        return {
+            "status": "success",
+            "message": "Ghost Protocol backend is working!",
+            "static_files_available": True,
+            "frontend_dir": str(_FRONTEND_DIR),
+            "files": ["index.html", "app.js", "style.css"]
+        }
+
     @app.get("/", include_in_schema=False)
     async def serve_dashboard() -> FileResponse:
         """Serve the frontend SPA."""
-        return FileResponse(str(_FRONTEND_DIR / "index.html"))
+        response = FileResponse(str(_FRONTEND_DIR / "index.html"))
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
 
     # Mount static assets AFTER all API routes so they don't shadow them
     if _FRONTEND_DIR.exists():
-        app.mount("/static", StaticFiles(directory=str(_FRONTEND_DIR)), name="static")
+        app.mount("/static", NoCacheStaticFiles(directory=str(_FRONTEND_DIR)), name="static")
 
     return app
 

@@ -788,18 +788,13 @@ def create_dashboard_router(
             from config.settings import settings
             
             # Create temporary instances for demo execution
-            llm = LLMClient(
-                base_url=settings.OLLAMA_BASE_URL,
-                model=settings.OLLAMA_MODEL,
-                temperature=settings.OLLAMA_TEMPERATURE,
-                timeout_seconds=settings.OLLAMA_TIMEOUT_SECONDS,
-            )
+            llm = LLMClient()
             
             intent_engine = IntentInferenceEngine(llm)
             env_shaper = EnvironmentShaper(llm)
             mitre_mapper = MitreMapper(llm)
             threat_scorer = ThreatScorer()
-            response_gen = ResponseGenerator()
+            response_gen = ResponseGenerator(llm)
             report_gen = ReportGenerator(llm)
             
             # Create telemetry logger (lightweight for demo)

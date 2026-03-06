@@ -141,7 +141,7 @@ The entire demo completes in approximately **4-6 seconds**, making it perfect fo
 
 ## Usage
 
-1. Ensure backend is running on port 8001
+1. Ensure backend is running on port 8002
 2. Open dashboard in browser
 3. Locate "Run Demo Script" button in Attack Timeline panel
 4. Click button
