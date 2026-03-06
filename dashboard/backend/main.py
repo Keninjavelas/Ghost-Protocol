@@ -587,7 +587,10 @@ def create_app() -> FastAPI:
         try:
             import socket
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            result = sock.connect_ex((settings.SSH_HOST or "localhost", settings.SSH_PORT))
+            probe_host = settings.SSH_HOST
+            if probe_host in {"0.0.0.0", "::", ""}:
+                probe_host = "127.0.0.1"
+            result = sock.connect_ex((probe_host, settings.SSH_PORT))
             sock.close()
             health_status["services"]["ssh_honeypot"] = "listening" if result == 0 else "not_listening"
             if result != 0:

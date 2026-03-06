@@ -13,6 +13,7 @@ import re
 import time
 from typing import Any, Optional
 
+import httpx
 import structlog
 from openai import AsyncOpenAI
 
@@ -55,10 +56,44 @@ class LLMClient:
     """Stateless LLM wrapper targeting a local Ollama server; session memory is passed in per call."""
 
     def __init__(self) -> None:
+        self._active_model = settings.OLLAMA_MODEL
         self._client = AsyncOpenAI(
             base_url=settings.OLLAMA_BASE_URL,
             api_key="ollama",  # Ollama ignores this value; SDK requires non-empty string
         )
+
+    async def _resolve_fallback_model(self) -> str | None:
+        """Pick a locally available model if the configured model is missing."""
+        base = settings.OLLAMA_BASE_URL.rstrip("/")
+        if base.endswith("/v1"):
+            base = base[:-3]
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{base}/api/tags")
+                resp.raise_for_status()
+                payload = resp.json()
+        except Exception as exc:
+            log.warning("ollama_tags_fetch_failed", error=str(exc))
+            return None
+
+        models = [m.get("name", "") for m in payload.get("models", []) if m.get("name")]
+        if not models:
+            return None
+
+        preferred = [
+            settings.OLLAMA_MODEL,
+            "llama3.1:latest",
+            "llama3:latest",
+            "qwen2.5-coder:7b",
+            "deepseek-r1:1.5b",
+        ]
+
+        for candidate in preferred:
+            if candidate in models:
+                return candidate
+
+        return models[0]
 
     async def chat(
         self,
@@ -75,16 +110,40 @@ class LLMClient:
         # ── LLM Latency Instrumentation ────────────────────────────────────────
         start = time.monotonic()
         
-        response = await self._client.chat.completions.create(
-            model=settings.OLLAMA_MODEL,
-            messages=messages,  # type: ignore[arg-type]
-            max_tokens=max_tokens or settings.LLM_MAX_TOKENS,
-            temperature=temperature if temperature is not None else settings.LLM_TEMPERATURE,
-            # response_format is intentionally omitted – not universally supported by Ollama models
-        )
+        model_used = self._active_model
+        try:
+            response = await self._client.chat.completions.create(
+                model=model_used,
+                messages=messages,  # type: ignore[arg-type]
+                max_tokens=max_tokens or settings.LLM_MAX_TOKENS,
+                temperature=temperature if temperature is not None else settings.LLM_TEMPERATURE,
+                # response_format is intentionally omitted – not universally supported by Ollama models
+            )
+        except Exception as exc:
+            if "not found" not in str(exc).lower():
+                raise
+
+            fallback = await self._resolve_fallback_model()
+            if not fallback:
+                raise
+
+            self._active_model = fallback
+            model_used = fallback
+            log.warning(
+                "ollama_model_fallback",
+                configured_model=settings.OLLAMA_MODEL,
+                fallback_model=fallback,
+            )
+
+            response = await self._client.chat.completions.create(
+                model=model_used,
+                messages=messages,  # type: ignore[arg-type]
+                max_tokens=max_tokens or settings.LLM_MAX_TOKENS,
+                temperature=temperature if temperature is not None else settings.LLM_TEMPERATURE,
+            )
         
         duration = time.monotonic() - start
-        log.info("llm_call_duration", duration_seconds=round(duration, 3), model=settings.OLLAMA_MODEL)
+        log.info("llm_call_duration", duration_seconds=round(duration, 3), model=model_used)
         
         raw = response.choices[0].message.content or "{}"
         if json_mode:

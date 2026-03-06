@@ -46,18 +46,26 @@ class AnomalyDetector:
         self.history.append(feature_vector)
         if self.model and len(self.history) >= 50:
             X = np.array(list(self.history), dtype=float)
-            self.model.fit(X)
-            self.model_fitted = True
+            try:
+                self.model.fit(X)
+                self.model_fitted = True
+            except Exception as exc:
+                self.model_fitted = False
+                logger.warning("anomaly_model_fit_failed", error=str(exc))
 
     def detect(self, feature_vector: list[float]) -> AnomalyResult:
         if self.model and self.model_fitted:
-            X = np.array([feature_vector], dtype=float)
-            pred = int(self.model.predict(X)[0])  # -1 anomaly, 1 normal
-            raw_score = float(self.model.decision_function(X)[0])
-            # Normalize to 0-100 risk style anomaly score.
-            score = max(0.0, min(100.0, (0.5 - raw_score) * 100))
-            label = "anomaly" if pred == -1 else "normal"
-            return AnomalyResult(score=score, label=label, model="isolation_forest")
+            try:
+                X = np.array([feature_vector], dtype=float)
+                pred = int(self.model.predict(X)[0])  # -1 anomaly, 1 normal
+                raw_score = float(self.model.decision_function(X)[0])
+                # Normalize to 0-100 risk style anomaly score.
+                score = max(0.0, min(100.0, (0.5 - raw_score) * 100))
+                label = "anomaly" if pred == -1 else "normal"
+                return AnomalyResult(score=score, label=label, model="isolation_forest")
+            except Exception as exc:
+                self.model_fitted = False
+                logger.warning("anomaly_model_predict_failed", error=str(exc))
 
         # Fallback drift score from simple deviation over history mean.
         if not self.history:

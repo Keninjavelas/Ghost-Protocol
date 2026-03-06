@@ -99,16 +99,23 @@ class SessionManager:
             bait_count=len(bait_files),
         )
 
-        # Persist to DB
-        async with get_session() as db:
-            db_session = DBSession(
-                id=session_id,
-                source_ip=source_ip,
-                username=username,
-                start_time=now,
-                status="active",
+        # Persist to DB (best-effort; continue in degraded mode on failure)
+        try:
+            async with get_session() as db:
+                db_session = DBSession(
+                    id=session_id,
+                    source_ip=source_ip,
+                    username=username,
+                    start_time=now,
+                    status="active",
+                )
+                db.add(db_session)
+        except Exception as exc:
+            log.warning(
+                "session_db_persist_failed",
+                session_id=str(session_id),
+                error=str(exc),
             )
-            db.add(db_session)
 
         # Spawn Docker sandbox
         try:
@@ -175,20 +182,23 @@ class SessionManager:
             if likelihood_apt is not None:
                 state.likelihood_apt = likelihood_apt
 
-        # Async DB update
-        async with get_session() as db:
-            db_obj = await db.get(DBSession, session_id)
-            if db_obj:
-                if attacker_type is not None:
-                    db_obj.attacker_type = attacker_type
-                if primary_objective is not None:
-                    db_obj.primary_objective = primary_objective
-                if sophistication_level is not None:
-                    db_obj.sophistication_level = sophistication_level
-                if risk_score is not None:
-                    db_obj.risk_score = risk_score
-                if threat_level is not None:
-                    db_obj.threat_level = threat_level
+        # Async DB update (best-effort in degraded mode)
+        try:
+            async with get_session() as db:
+                db_obj = await db.get(DBSession, session_id)
+                if db_obj:
+                    if attacker_type is not None:
+                        db_obj.attacker_type = attacker_type
+                    if primary_objective is not None:
+                        db_obj.primary_objective = primary_objective
+                    if sophistication_level is not None:
+                        db_obj.sophistication_level = sophistication_level
+                    if risk_score is not None:
+                        db_obj.risk_score = risk_score
+                    if threat_level is not None:
+                        db_obj.threat_level = threat_level
+        except Exception as exc:
+            log.warning("threat_profile_db_update_failed", session_id=str(session_id), error=str(exc))
 
     async def append_command(
         self,
@@ -217,15 +227,17 @@ class SessionManager:
             try:
                 report_data = await self._report_gen.generate(state)
                 
-                # Persist report to database
-                async with get_session() as db:
-                    db_report = DBReport(
-                        session_id=session_id,
-                        report_json=report_data,
-                    )
-                    db.add(db_report)
-                
-                log.info("report_persisted", session_id=str(session_id))
+                # Persist report to database (best-effort)
+                try:
+                    async with get_session() as db:
+                        db_report = DBReport(
+                            session_id=session_id,
+                            report_json=report_data,
+                        )
+                        db.add(db_report)
+                    log.info("report_persisted", session_id=str(session_id))
+                except Exception as exc:
+                    log.warning("report_db_persist_failed", session_id=str(session_id), error=str(exc))
                 
                 # ── WebSocket Event: report_generated ──────────────────────────
                 if self._ws:
@@ -247,12 +259,15 @@ class SessionManager:
             except Exception as exc:
                 log.warning("container_destroy_failed", error=str(exc))
 
-        # Update DB
-        async with get_session() as db:
-            db_obj = await db.get(DBSession, session_id)
-            if db_obj:
-                db_obj.status = "closed"
-                db_obj.end_time = datetime.now(timezone.utc)
+        # Update DB (best-effort)
+        try:
+            async with get_session() as db:
+                db_obj = await db.get(DBSession, session_id)
+                if db_obj:
+                    db_obj.status = "closed"
+                    db_obj.end_time = datetime.now(timezone.utc)
+        except Exception as exc:
+            log.warning("session_close_db_update_failed", session_id=str(session_id), error=str(exc))
         
         # ── WebSocket Event: session_closed ────────────────────────────────────
         if self._ws:

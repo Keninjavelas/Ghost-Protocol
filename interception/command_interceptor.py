@@ -7,13 +7,14 @@ Every terminal command from the attacker flows through here:
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
 import structlog
 
 from ai_core.intent_inference import IntentInferenceEngine
-from ai_core.environment_shaper import EnvironmentShaper
+from ai_core.environment_shaper import EnvironmentShaper, CORPORATE_NARRATIVE
 from ai_core.mitre_mapper import MitreMapper
 from ai_core.response_generator import ResponseGenerator
 from ai_core.threat_scorer import ThreatScorer
@@ -59,6 +60,106 @@ class CommandInterceptor:
         self._telemetry = telemetry
         self._ws = ws_manager
 
+    _FAST_PATH_COMMANDS = {
+        "whoami", "pwd", "hostname", "uname", "id", "cd", "ls", "ll", "dir", "cat",
+        "less", "more", "head", "tail", "view", "strings", "grep", "touch", "echo",
+        "history", "date", "uptime", "ip", "ifconfig", "ps", "top", "netstat", "ss",
+    }
+
+    def _is_fast_path_command(self, command: str) -> bool:
+        cmd = command.strip().lower()
+        if not cmd:
+            return True
+        command_word = cmd.split()[0]
+        return command_word in self._FAST_PATH_COMMANDS
+
+    def _heuristic_intent(self, command: str) -> dict[str, object]:
+        cmd = command.lower()
+
+        objective = "reconnaissance"
+        attacker_type = "opportunist"
+        sophistication = "low"
+        confidence = 0.55
+
+        if re.search(r"cat\s+.*(password|credential|shadow|kubeconfig|\.aws|\.env|db|sql)", cmd):
+            objective = "credential-harvesting"
+            attacker_type = "professional"
+            sophistication = "medium"
+            confidence = 0.82
+        elif re.search(r"(ifconfig|ip\s+a|netstat|ss|ps\s+aux|find|ls|ll|dir)", cmd):
+            objective = "reconnaissance"
+            attacker_type = "opportunist"
+            sophistication = "low"
+            confidence = 0.68
+
+        return {
+            "attacker_type": attacker_type,
+            "primary_objective": objective,
+            "sophistication_level": sophistication,
+            "confidence": confidence,
+            "reasoning": "Deterministic fast-path heuristic classification",
+        }
+
+    def _heuristic_mitre(self, command: str) -> dict[str, object]:
+        cmd = command.lower()
+
+        if re.search(r"cat\s+.*(password|credential|shadow|\.aws|\.env)", cmd):
+            return {
+                "tactics_detected": ["Credential Access"],
+                "techniques": [{
+                    "id": "T1552",
+                    "name": "Unsecured Credentials",
+                    "tactic": "Credential Access",
+                    "confidence": 0.85,
+                }],
+            }
+
+        if "cat " in cmd and any(k in cmd for k in ["db", "sql", "backup"]):
+            return {
+                "tactics_detected": ["Collection"],
+                "techniques": [{
+                    "id": "T1005",
+                    "name": "Data from Local System",
+                    "tactic": "Collection",
+                    "confidence": 0.78,
+                }],
+            }
+
+        if any(k in cmd for k in ["netstat", "ss", "ip a", "ifconfig"]):
+            return {
+                "tactics_detected": ["Discovery"],
+                "techniques": [{
+                    "id": "T1049",
+                    "name": "System Network Connections Discovery",
+                    "tactic": "Discovery",
+                    "confidence": 0.75,
+                }],
+            }
+
+        if any(k in cmd for k in ["ls", "ll", "dir", "find", "pwd"]):
+            return {
+                "tactics_detected": ["Discovery"],
+                "techniques": [{
+                    "id": "T1083",
+                    "name": "File and Directory Discovery",
+                    "tactic": "Discovery",
+                    "confidence": 0.72,
+                }],
+            }
+
+        if "whoami" in cmd or cmd.startswith("id"):
+            return {
+                "tactics_detected": ["Discovery"],
+                "techniques": [{
+                    "id": "T1033",
+                    "name": "System Owner/User Discovery",
+                    "tactic": "Discovery",
+                    "confidence": 0.7,
+                }],
+            }
+
+        return {"tactics_detected": [], "techniques": []}
+
     async def process(
         self,
         session_state: "SessionState",
@@ -83,8 +184,14 @@ class CommandInterceptor:
                 )
             )
 
+        fast_path = self._is_fast_path_command(command)
+
         # ── 1. Intent Inference ────────────────────────────────────────────────
-        intent = await self._intent.infer(session_state)
+        if fast_path:
+            intent = self._heuristic_intent(command)
+            log.debug("fast_path_intent_used", session_id=str(sid), command=command)
+        else:
+            intent = await self._intent.infer(session_state)
         
         # ── WebSocket Event: intent (AI-generated intelligence with reasoning) ──
         if self._ws:
@@ -113,7 +220,15 @@ class CommandInterceptor:
         )
 
         # ── 3. Environment Shaping ─────────────────────────────────────────────
-        env_context = await self._shaper.shape(session_state, intent)
+        if fast_path:
+            env_context = {
+                "injected_files": [],
+                "injected_dirs": [],
+                "environment_narrative": CORPORATE_NARRATIVE,
+                "canary_trigger_files": [],
+            }
+        else:
+            env_context = await self._shaper.shape(session_state, intent)
 
         # ── 4. Generate Response ───────────────────────────────────────────────
         response = await self._responder.generate(
@@ -154,7 +269,10 @@ class CommandInterceptor:
 
         # ── 5. MITRE Mapping (parallel-ish, fire-and-forget telemetry) ─────────
         try:
-            mitre_result = await self._mitre.map(command, intent)
+            if fast_path:
+                mitre_result = self._heuristic_mitre(command)
+            else:
+                mitre_result = await self._mitre.map(command, intent)
             
             # ── WebSocket Event: mitre (AI-generated MITRE ATT&CK mapping) ──────
             techniques_detail = []

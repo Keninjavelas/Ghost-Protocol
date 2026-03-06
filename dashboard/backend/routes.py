@@ -93,17 +93,23 @@ def create_dashboard_router(
     @router.get("/sessions")
     async def list_sessions(db: AsyncSession = Depends(get_db_session)) -> list[dict[str, Any]]:
         """Return all sessions (active + closed) with summary fields."""
-        result = await db.execute(
-            select(DBSession).order_by(DBSession.start_time.desc()).limit(200)
-        )
-        sessions = result.scalars().all()
+        sessions: list[DBSession] = []
+        try:
+            result = await db.execute(
+                select(DBSession).order_by(DBSession.start_time.desc()).limit(200)
+            )
+            sessions = list(result.scalars().all())
+        except Exception as exc:
+            log.warning("sessions_db_query_failed", error=str(exc))
 
         # Merge with live in-memory state for active sessions
         live = {str(s.session_id): s for s in await session_manager.all_sessions()}
 
         out = []
+        seen_ids: set[str] = set()
         for s in sessions:
             sid_str = str(s.id)
+            seen_ids.add(sid_str)
             entry: dict[str, Any] = {
                 "session_id": sid_str,
                 "source_ip": s.source_ip,
@@ -121,6 +127,28 @@ def create_dashboard_router(
                 entry["command_count"] = len(live_state.command_history)
                 entry["working_directory"] = live_state.working_directory
             out.append(entry)
+
+        # Add live-only sessions when DB is unavailable.
+        for sid_str, live_state in live.items():
+            if sid_str in seen_ids:
+                continue
+            out.append(
+                {
+                    "session_id": sid_str,
+                    "source_ip": live_state.source_ip,
+                    "username": live_state.username,
+                    "start_time": live_state.start_time.isoformat(),
+                    "end_time": None,
+                    "status": "active",
+                    "threat_level": live_state.threat_level,
+                    "risk_score": live_state.risk_score,
+                    "attacker_type": live_state.attacker_type,
+                    "primary_objective": live_state.primary_objective,
+                    "command_count": len(live_state.command_history),
+                    "working_directory": live_state.working_directory,
+                }
+            )
+
         return out
 
     @router.get("/session/{session_id}")
@@ -134,36 +162,65 @@ def create_dashboard_router(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid session ID")
 
-        result = await db.execute(
-            select(DBSession)
-            .where(DBSession.id == uid)
-            .options(selectinload(DBSession.commands))
-        )
-        s = result.scalar_one_or_none()
-        if s is None:
+        try:
+            result = await db.execute(
+                select(DBSession)
+                .where(DBSession.id == uid)
+                .options(selectinload(DBSession.commands))
+            )
+            s = result.scalar_one_or_none()
+            if s is not None:
+                commands = sorted(s.commands, key=lambda c: c.timestamp)[-100:]
+                return {
+                    "session_id": str(s.id),
+                    "source_ip": s.source_ip,
+                    "username": s.username,
+                    "start_time": s.start_time.isoformat() if s.start_time else None,
+                    "end_time": s.end_time.isoformat() if s.end_time else None,
+                    "status": s.status,
+                    "threat_level": s.threat_level,
+                    "risk_score": s.risk_score,
+                    "attacker_type": s.attacker_type,
+                    "primary_objective": s.primary_objective,
+                    "sophistication_level": s.sophistication_level,
+                    "commands": [
+                        {
+                            "command": c.command,
+                            "timestamp": c.timestamp.isoformat(),
+                            "ai_classification": c.ai_classification,
+                            "mitre_technique": c.mitre_technique,
+                        }
+                        for c in commands
+                    ],
+                }
+        except Exception as exc:
+            log.warning("session_detail_db_query_failed", session_id=session_id, error=str(exc))
+
+        # Fallback to in-memory state for degraded DB mode.
+        live = await session_manager.get_session(uid)
+        if not live:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        commands = sorted(s.commands, key=lambda c: c.timestamp)[-100:]
         return {
-            "session_id": str(s.id),
-            "source_ip": s.source_ip,
-            "username": s.username,
-            "start_time": s.start_time.isoformat() if s.start_time else None,
-            "end_time": s.end_time.isoformat() if s.end_time else None,
-            "status": s.status,
-            "threat_level": s.threat_level,
-            "risk_score": s.risk_score,
-            "attacker_type": s.attacker_type,
-            "primary_objective": s.primary_objective,
-            "sophistication_level": s.sophistication_level,
+            "session_id": str(live.session_id),
+            "source_ip": live.source_ip,
+            "username": live.username,
+            "start_time": live.start_time.isoformat(),
+            "end_time": None,
+            "status": "active",
+            "threat_level": live.threat_level,
+            "risk_score": live.risk_score,
+            "attacker_type": live.attacker_type,
+            "primary_objective": live.primary_objective,
+            "sophistication_level": live.sophistication_level,
             "commands": [
                 {
-                    "command": c.command,
-                    "timestamp": c.timestamp.isoformat(),
-                    "ai_classification": c.ai_classification,
-                    "mitre_technique": c.mitre_technique,
+                    "command": c.get("command", ""),
+                    "timestamp": c.get("timestamp"),
+                    "ai_classification": None,
+                    "mitre_technique": None,
                 }
-                for c in commands
+                for c in live.command_history[-100:]
             ],
         }
 
@@ -178,12 +235,17 @@ def create_dashboard_router(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid session ID")
 
-        result = await db.execute(
-            select(MitreMapping)
-            .where(MitreMapping.session_id == uid)
-            .order_by(MitreMapping.timestamp)
-        )
-        mappings = result.scalars().all()
+        try:
+            result = await db.execute(
+                select(MitreMapping)
+                .where(MitreMapping.session_id == uid)
+                .order_by(MitreMapping.timestamp)
+            )
+            mappings = result.scalars().all()
+        except Exception as exc:
+            log.warning("mitre_db_query_failed", session_id=session_id, error=str(exc))
+            mappings = []
+
         return [
             {
                 "technique_id": m.technique_id,
@@ -194,7 +256,6 @@ def create_dashboard_router(
             }
             for m in mappings
         ]
-
     @router.get("/threat/{session_id}")
     async def get_threat(
         session_id: str,
@@ -206,13 +267,17 @@ def create_dashboard_router(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid session ID")
 
-        s = await db.get(DBSession, uid)
-        if s is None:
-            raise HTTPException(status_code=404, detail="Session not found")
-
-        # Return live if still active
         live_sessions = {str(x.session_id): x for x in await session_manager.all_sessions()}
         live = live_sessions.get(session_id)
+
+        try:
+            s = await db.get(DBSession, uid)
+        except Exception as exc:
+            log.warning("threat_db_query_failed", session_id=session_id, error=str(exc))
+            s = None
+
+        if s is None and live is None:
+            raise HTTPException(status_code=404, detail="Session not found")
 
         return {
             "session_id": session_id,
@@ -220,7 +285,7 @@ def create_dashboard_router(
             "threat_level": live.threat_level if live else s.threat_level,
             "attacker_category": live.attacker_type if live else s.attacker_type,
             "likelihood_APT": live.likelihood_apt if live else None,
-            "status": s.status,
+            "status": (s.status if s else "active"),
         }
 
     @router.get("/beacons")
@@ -255,10 +320,15 @@ def create_dashboard_router(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid session ID")
 
-        result = await db.execute(
-            select(Report).where(Report.session_id == uid)
-        )
-        report = result.scalar_one_or_none()
+        try:
+            result = await db.execute(
+                select(Report).where(Report.session_id == uid)
+            )
+            report = result.scalar_one_or_none()
+        except Exception as exc:
+            log.warning("report_db_query_failed", session_id=session_id, error=str(exc))
+            raise HTTPException(status_code=503, detail="Database unavailable for reports")
+
         if report is None:
             raise HTTPException(status_code=404, detail="Report not yet generated")
 
@@ -267,7 +337,6 @@ def create_dashboard_router(
             "generated_at": report.generated_at.isoformat(),
             "report": report.report_json,
         }
-
     # ── Session Snapshot (Quick Summary for Judges) ────────────────────────────
     @router.get("/snapshot/{session_id}")
     async def get_session_snapshot(

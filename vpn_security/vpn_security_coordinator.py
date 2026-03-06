@@ -32,7 +32,7 @@ from .user_behavior_analytics import UserBehaviorAnalytics
 from .vpn_fingerprinter import VPNFingerprinter
 from .leak_detector import LeakDetector
 from .zero_trust_engine import ZeroTrustEngine
-from .anomaly_detector import AnomalyDetector
+from .anomaly_detector import AnomalyDetector, AnomalyResult
 
 
 logger = structlog.get_logger(__name__)
@@ -68,6 +68,7 @@ class VPNSecurityCoordinator:
         self._task: asyncio.Task | None = None
         self._recent_findings: list[dict[str, Any]] = []
         self._max_findings = 500
+        self._anomaly_disabled = False
 
     async def start(self) -> None:
         if self.running:
@@ -122,8 +123,16 @@ class VPNSecurityCoordinator:
         fingerprint = self.fingerprinter.analyze(features)
         leak_findings = self.leak_detector.analyze(features, vpn_detected=vpn_result.is_vpn)
 
-        self.anomaly_detector.update(vector)
-        anomaly = self.anomaly_detector.detect(vector)
+        if self._anomaly_disabled:
+            anomaly = AnomalyResult(score=0.0, label="normal", model="fallback")
+        else:
+            try:
+                self.anomaly_detector.update(vector)
+                anomaly = self.anomaly_detector.detect(vector)
+            except Exception as exc:
+                self._anomaly_disabled = True
+                logger.warning("vpn_anomaly_detection_disabled", error=str(exc))
+                anomaly = AnomalyResult(score=0.0, label="normal", model="fallback")
 
         zt = self.zero_trust.evaluate_access(
             user_id=user_id,

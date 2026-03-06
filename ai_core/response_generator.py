@@ -96,13 +96,13 @@ class ResponseGenerator:
         """
         cmd_lower = command.strip().lower()
         
-        # Quick check: does it start with ls or dir?
-        if not (cmd_lower.startswith("ls") or cmd_lower.startswith("dir")):
+        # Quick check: does it start with ls/dir/ll?
+        if not (cmd_lower.startswith("ls") or cmd_lower.startswith("dir") or cmd_lower.startswith("ll")):
             return (None, False)
         
         # Extract the command word
         parts = cmd_lower.split()
-        if not parts or parts[0] not in ["ls", "dir"]:
+        if not parts or parts[0] not in ["ls", "dir", "ll"]:
             return (None, False)
         
         # Parse flags and path
@@ -118,8 +118,8 @@ class ResponseGenerator:
                 path = part
                 break
         
-        # Check for long format flags (-l, -la, -al)
-        long_format = "l" in flags.lower()
+        # Check for long format flags (-l, -la, -al) and ll alias behavior.
+        long_format = "l" in flags.lower() or (parts and parts[0] == "ll")
         
         return (path, long_format)
 
@@ -226,6 +226,13 @@ class ResponseGenerator:
         # pwd - print working directory
         if cmd == "pwd":
             return session_state.working_directory
+
+        # history - command history for attacker realism
+        if cmd == "history":
+            rows = []
+            for index, entry in enumerate(session_state.command_history[-50:], start=1):
+                rows.append(f"{index:5d}  {entry.get('command', '')}")
+            return "\n".join(rows)
         
         # whoami - current user
         if cmd == "whoami":
@@ -308,6 +315,40 @@ lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
         # uptime - system uptime
         if cmd == "uptime":
             return " 14:23:15 up 7 days, 3:42,  1 user,  load average: 0.08, 0.12, 0.09"
+
+        # ps - process listing
+        if cmd in {"ps", "ps aux", "ps -ef"}:
+            return """USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root           1  0.0  0.1 167640 11304 ?        Ss   08:01   0:02 /sbin/init
+root         318  0.0  0.1  18576  3544 ?        Ss   08:01   0:00 /lib/systemd/systemd-journald
+root         742  0.0  0.2 115300  8920 ?        Ssl  08:02   0:01 /usr/sbin/sshd -D
+www-data    1242  0.1  0.5 241200 21440 ?        S    08:03   0:06 /usr/sbin/nginx -g daemon off;
+mysql       1387  0.3  2.1 1512380 85620 ?       Ssl  08:03   0:24 /usr/sbin/mysqld
+root        2291  0.0  0.1  13144  4320 pts/0    Ss   14:20   0:00 -bash
+root        2312  0.0  0.1  13876  3696 pts/0    R+   14:23   0:00 ps aux"""
+
+        # top - single snapshot output
+        if cmd == "top":
+            return """top - 14:23:15 up 7 days,  3:42,  1 user,  load average: 0.08, 0.12, 0.09
+Tasks: 127 total,   1 running, 126 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  3.1 us,  1.2 sy,  0.0 ni, 95.2 id,  0.3 wa,  0.0 hi,  0.2 si,  0.0 st
+MiB Mem :   3948.0 total,   1250.1 free,   1438.2 used,   1259.7 buff/cache
+MiB Swap:   2048.0 total,   2048.0 free,      0.0 used.   2251.4 avail Mem
+
+  PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     TIME+ COMMAND
+ 1387 mysql     20   0 1512380  85620  18880 S   1.7  2.1   0:24.51 mysqld
+ 1242 www-data  20   0  241200  21440   8832 S   0.3  0.5   0:06.12 nginx
+ 2312 root      20   0   13876   3696   3232 R   0.3  0.1   0:00.01 top"""
+
+        # netstat / ss - network sockets
+        if cmd in {"netstat", "netstat -tlnp", "netstat -an", "ss", "ss -tlnp"}:
+            return """Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      742/sshd
+tcp        0      0 127.0.0.1:3306          0.0.0.0:*               LISTEN      1387/mysqld
+tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN      1242/nginx
+tcp6       0      0 :::443                  :::*                    LISTEN      1242/nginx
+udp        0      0 0.0.0.0:68              0.0.0.0:*                           512/dhclient"""
         
         # cd - change directory (original working directory update logic)
         if cmd.startswith("cd"):

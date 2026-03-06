@@ -86,7 +86,9 @@ class TrafficIngestion:
             max_flows: Maximum concurrent flows to track
             enable_tls_analysis: Extract TLS metadata
         """
-        self.interface = interface
+        normalized = interface.strip().lower() if interface else ""
+        # Scapy on Windows does not accept 'any'; None lets Scapy pick default iface.
+        self.interface: Optional[str] = None if normalized in {"", "any", "all", "default", "*"} else interface
         self.flow_timeout = flow_timeout
         self.max_flows = max_flows
         self.enable_tls_analysis = enable_tls_analysis
@@ -106,7 +108,7 @@ class TrafficIngestion:
         
         logger.info(
             "traffic_ingestion_initialized",
-            interface=interface,
+            interface=self.interface or "auto",
             flow_timeout=flow_timeout,
             max_flows=max_flows
         )
@@ -119,7 +121,7 @@ class TrafficIngestion:
         
         self.is_running = True
         self._capture_task = asyncio.create_task(self._capture_loop())
-        logger.info("traffic_ingestion_started", interface=self.interface)
+        logger.info("traffic_ingestion_started", interface=self.interface or "auto")
     
     async def stop(self):
         """Stop traffic capture"""
