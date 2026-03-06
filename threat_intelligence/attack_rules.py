@@ -43,6 +43,7 @@ class AttackRuleEngine:
     def __init__(self):
         """Initialize attack rule engine."""
         self.rules = self._build_rules()
+        self.disabled_rules: set[str] = set()
         logger.info("attack_rule_engine_initialized", total_rules=len(self.rules))
 
     def _build_rules(self) -> List[AttackRule]:
@@ -430,6 +431,8 @@ class AttackRuleEngine:
         """
         matching_rules = []
         for rule in self.rules:
+            if rule.name in self.disabled_rules:
+                continue
             if self.evaluate_rule(rule, features):
                 matching_rules.append(rule)
         
@@ -438,3 +441,33 @@ class AttackRuleEngine:
     def get_rules_by_category(self, category: AttackCategory) -> List[AttackRule]:
         """Get all rules in a category."""
         return [r for r in self.rules if r.category == category]
+
+    def get_rules(self, category: Optional[str] = None) -> List[AttackRule]:
+        """Get rules, optionally filtered by category string."""
+        if not category:
+            return [r for r in self.rules]
+
+        try:
+            category_enum = AttackCategory(category.upper())
+        except ValueError:
+            return []
+
+        return self.get_rules_by_category(category_enum)
+
+    def disable_rule(self, rule_id: str) -> None:
+        """Disable rule by normalized id or by display name."""
+        for rule in self.rules:
+            normalized = rule.name.lower().replace(" ", "_")
+            if rule_id in {normalized, rule.name}:
+                self.disabled_rules.add(rule.name)
+                return
+        raise ValueError(f"rule_not_found: {rule_id}")
+
+    def enable_rule(self, rule_id: str) -> None:
+        """Enable rule by normalized id or by display name."""
+        for rule in self.rules:
+            normalized = rule.name.lower().replace(" ", "_")
+            if rule_id in {normalized, rule.name}:
+                self.disabled_rules.discard(rule.name)
+                return
+        raise ValueError(f"rule_not_found: {rule_id}")

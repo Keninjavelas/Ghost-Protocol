@@ -96,10 +96,10 @@ async def get_alerts(
     """Get recent alerts."""
     try:
         orchestrator = get_orchestrator()
-        alerts = orchestrator.alert_engine.get_recent_alerts(
-            count=limit,
-            severity_filter=severity
-        )
+        alerts = orchestrator.alert_engine.get_recent_alerts(count=limit)
+        if severity:
+            severity_upper = severity.upper()
+            alerts = [a for a in alerts if str(a.get("severity", "")).upper() == severity_upper]
         return {"alerts": alerts, "count": len(alerts)}
     except Exception as e:
         logger.error("get_alerts_failed", error=str(e))
@@ -144,10 +144,10 @@ async def get_rules(
         return {
             "rules": [
                 {
-                    "id": r.id,
+                    "id": r.name.lower().replace(" ", "_"),
                     "name": r.name,
                     "category": r.category.value,
-                    "severity": r.severity.value,
+                    "confidence": r.confidence,
                     "description": r.description,
                 }
                 for r in rules

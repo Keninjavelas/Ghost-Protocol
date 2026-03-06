@@ -189,11 +189,19 @@ class DetectionOrchestrator:
             })
             
             # Log threat
-            await self.detection_logger.log_threat(
-                threat_result.attack_type if threat_result else attack_type,
-                source_ip,
-                threat_score
-            )
+            if threat_result:
+                await self.detection_logger.log_threat(threat_result)
+            else:
+                await self.detection_logger.log_alert(
+                    alert_type=attack_type or "ANOMALY",
+                    severity="warning",
+                    message=f"Threat-like anomaly detected from {source_ip}",
+                    metadata={
+                        "source_ip": source_ip,
+                        "threat_score": threat_score,
+                        "rules_triggered": [r.name for r in matched_rules],
+                    },
+                )
             
             # Send alert
             from response_engine.alert_engine import AlertSeverity
@@ -213,13 +221,15 @@ class DetectionOrchestrator:
                 }
             )
             
-            # Determine response
-            response_action = await self.response_orchestrator.respond_to_threat(
-                threat_result or combined_result,
-                threat_score
-            )
+            # Determine response (only when threat_result has structured threat metadata)
+            response_action = None
+            if threat_result:
+                response_action = await self.response_orchestrator.respond_to_threat(
+                    threat_result,
+                    threat_score
+                )
             
-            # Log response
+            # Log response decision
             await self.security_logger.log_response(
                 action=response_action.value if response_action else "MONITOR",
                 source_ip=source_ip,

@@ -67,7 +67,11 @@ class NetworkDefenseSystem:
         logger.info("initializing_network_defense_system")
         
         # 1. Packet Capture
-        self.packet_capture = PacketCaptureEngine(interface=interface)
+        capture_interface = None if interface == "any" else interface
+        self.packet_capture = PacketCaptureEngine(
+            interface=capture_interface,
+            packet_callback=self._process_packet_callback,
+        )
         
         # 2. Traffic Parser
         self.traffic_parser = TrafficParser()
@@ -132,8 +136,8 @@ class NetworkDefenseSystem:
         
         logger.info("starting_network_defense_system")
         
-        # Start packet capture with callback
-        self.packet_capture.start_capture(callback=self._process_packet_callback)
+        # Start packet capture
+        self.packet_capture.start_capture()
         
         # Start monitoring loop
         self.running = True
@@ -188,7 +192,7 @@ class NetworkDefenseSystem:
                 features = self.feature_extractor.extract_features()
                 
                 # Get recent packets
-                packets = self.packet_capture.get_buffered_packets(limit=500)
+                packets = self.packet_capture.get_buffered_packets(count=500)
                 parsed_packets = [
                     self.traffic_parser.parse_packet(p)
                     for p in packets

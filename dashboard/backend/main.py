@@ -152,6 +152,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.ws_manager = _ws_manager
     app.state.detection_orchestrator = _detection_orchestrator
 
+    # Register routers after service initialization.
+    if not getattr(app.state, "routes_registered", False):
+        app.include_router(create_beacon_router(_canary_mgr, _telemetry))
+        app.include_router(create_dashboard_router(_session_mgr, _ws_manager))
+        app.include_router(create_ws_router(_ws_manager))
+        app.include_router(detection_api.router)
+        app.state.routes_registered = True
+
     # ── Validate Service Health ───────────────────────────────────────────
     # Database health check
     try:
@@ -302,24 +310,10 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Deferred router registration (services available after lifespan starts)
-    @app.on_event("startup")
-    async def register_routes() -> None:
-        assert _session_mgr is not None
-        assert _telemetry is not None
-        assert _canary_mgr is not None
-        assert _ws_manager is not None
-        assert _detection_orchestrator is not None
-
-        app.include_router(create_beacon_router(_canary_mgr, _telemetry))
-        app.include_router(create_dashboard_router(_session_mgr, _ws_manager))
-        app.include_router(create_ws_router(_ws_manager))
-        app.include_router(detection_api.router)
-        
-        # Add detection WebSocket endpoint
-        @app.websocket("/ws/threats")
-        async def websocket_threats(websocket):
-            await websocket_handler(websocket)
+    # Detection WebSocket endpoint
+    @app.websocket("/ws/threats")
+    async def websocket_threats(websocket):
+        await websocket_handler(websocket)
 
     # ── Resilience API Endpoints ───────────────────────────────────────────────
 

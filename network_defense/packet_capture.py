@@ -130,9 +130,17 @@ class PacketCaptureEngine:
                 if stat_key in self.stats:
                     self.stats[stat_key] += 1
                 
-                # Invoke callback if provided
+                # Invoke callback if provided.
                 if self.packet_callback:
-                    asyncio.create_task(self.packet_callback(parsed))
+                    if asyncio.iscoroutinefunction(self.packet_callback):
+                        try:
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(self.packet_callback(parsed))
+                        except RuntimeError:
+                            # Packet capture runs in a worker thread without an event loop.
+                            pass
+                    else:
+                        self.packet_callback(parsed)
         
         except Exception as e:
             logger.error("packet_processing_failed", error=str(e))
