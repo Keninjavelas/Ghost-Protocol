@@ -899,3 +899,4 @@ document.addEventListener('DOMContentLoaded', () => {
     loadInitialSessions();
     connect();
 });
+

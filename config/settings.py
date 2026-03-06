@@ -92,6 +92,36 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = Field(default="INFO")
     LOG_JSON: bool = Field(default=True, description="Emit structured JSON logs")
 
+    # ── Resilience (Network Seizure Defense) ──────────────────────────────────
+    CACHE_DIR: str = Field(
+        default="/var/ghost_protocol/cache",
+        description="Directory for encrypted offline cache"
+    )
+    HEARTBEAT_INTERVAL_SECONDS: float = Field(
+        default=30.0,
+        description="Expected time between heartbeats"
+    )
+    HEARTBEAT_FAILURE_THRESHOLD: int = Field(
+        default=4,
+        description="Consecutive failures before network seizure detection"
+    )
+    NETWORK_BASELINE_WINDOW_SECONDS: int = Field(
+        default=300,
+        description="Time window for network baseline calculation"
+    )
+    NETWORK_ANOMALY_THRESHOLD: float = Field(
+        default=2.5,
+        description="Multiplier for anomaly detection (e.g., 2.5x baseline)"
+    )
+    SYSLOG_ALERTS_ENABLED: bool = Field(
+        default=True,
+        description="Enable syslog alerting"
+    )
+    EXTERNAL_MONITOR_URL: Optional[str] = Field(
+        default=None,
+        description="External monitoring service URL for out-of-band alerts"
+    )
+
 
 # Singleton – import this everywhere
 settings = Settings()

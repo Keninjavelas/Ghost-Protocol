@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Dict, Optional, List
 
 import structlog
 
@@ -16,6 +16,8 @@ from database.db import get_session
 from database.models import Session as DBSession, Report as DBReport
 from sandbox.docker_manager import DockerManager
 from session.session_model import SessionState
+from resilience import EncryptedCache, DeadMansSwitch, NetworkAnomalyDetector, OutOfBandAlert
+from config.settings import settings
 
 if TYPE_CHECKING:
     from ai_core.report_generator import ReportGenerator
@@ -38,6 +40,25 @@ class SessionManager:
         self._docker = docker_manager
         self._report_gen = report_generator
         self._ws = ws_manager
+        
+        # Resilience components
+        self._encrypted_cache = EncryptedCache(
+            cache_dir=settings.CACHE_DIR,
+            encryption_key=None  # Auto-generate ephemeral key
+        )
+        self._deadmans_switch = DeadMansSwitch(
+            heartbeat_interval=settings.HEARTBEAT_INTERVAL_SECONDS,
+            failure_threshold=settings.HEARTBEAT_FAILURE_THRESHOLD,
+            on_network_seizure=self._handle_network_seizure
+        )
+        self._network_monitor = NetworkAnomalyDetector(
+            baseline_window_seconds=settings.NETWORK_BASELINE_WINDOW_SECONDS,
+            anomaly_threshold=settings.NETWORK_ANOMALY_THRESHOLD
+        )
+        self._outofband_alert = OutOfBandAlert(
+            syslog_enabled=settings.SYSLOG_ALERTS_ENABLED,
+            external_monitor_url=settings.EXTERNAL_MONITOR_URL
+        )
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -250,3 +271,78 @@ class SessionManager:
             )
 
         log.info("session_closed", session_id=str(session_id))
+
+    # ── Resilience Methods ─────────────────────────────────────────────────────
+
+    async def start_resilience(self) -> None:
+        """Start resilience monitoring systems."""
+        await self._deadmans_switch.start()
+        log.info("resilience_systems_started")
+
+    async def stop_resilience(self) -> None:
+        """Stop resilience monitoring systems."""
+        await self._deadmans_switch.stop()
+        log.info("resilience_systems_stopped")
+
+    def record_heartbeat(self) -> None:
+        """Record heartbeat from dashboard."""
+        self._deadmans_switch.heartbeat()
+
+    async def _handle_network_seizure(self) -> None:
+        """Emergency callback when network seizure is detected."""
+        log.critical("executing_network_seizure_protocol")
+        
+        # Cache all active session reports offline
+        async with self._lock:
+            session_ids = list(self._sessions.keys())
+        
+        cached_count = 0
+        for session_id in session_ids:
+            state = await self.get_session(session_id)
+            if state and self._report_gen:
+                try:
+                    # Generate report
+                    report_data = await self._report_gen.generate(state)
+                    
+                    # Cache encrypted
+                    success = self._encrypted_cache.cache_report(
+                        session_id=str(session_id),
+                        report_data=report_data
+                    )
+                    
+                    if success:
+                        cached_count += 1
+                except Exception as e:
+                    log.error(
+                        "emergency_cache_failed",
+                        session_id=str(session_id),
+                        error=str(e)
+                    )
+        
+        # Send out-of-band alert
+        await self._outofband_alert.send_network_seizure_alert(
+            session_ids=[str(sid) for sid in session_ids]
+        )
+        
+        log.critical(
+            "network_seizure_protocol_complete",
+            sessions_cached=cached_count,
+            total_sessions=len(session_ids)
+        )
+
+    def detect_network_anomalies(self) -> List[dict]:
+        """Detect current network anomalies."""
+        return self._network_monitor.detect_anomalies()
+
+    def get_cached_report(self, session_id: str) -> Optional[dict]:
+        """Retrieve a cached report from encrypted storage."""
+        return self._encrypted_cache.retrieve_report(session_id)
+
+    def list_cached_reports(self) -> List[str]:
+        """List all cached session IDs."""
+        return self._encrypted_cache.list_cached_reports()
+
+    @property
+    def is_network_seized(self) -> bool:
+        """Check if network seizure is currently detected."""
+        return self._deadmans_switch.is_seized

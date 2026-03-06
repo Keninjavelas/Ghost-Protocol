@@ -147,11 +147,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         log.critical("ssh_server_startup_failed", error=str(e))
         raise RuntimeError(f"SSH server failed to start: {e}")
 
+    # Start resilience monitoring
+    try:
+        await _session_mgr.start_resilience()
+        log.info("resilience_monitoring_activated")
+    except Exception as e:
+        log.warning("resilience_startup_failed", error=str(e))
+
     log.info("ghost_dashboard_ready", port=settings.DASHBOARD_PORT)
     yield
 
     # ── Shutdown ───────────────────────────────────────────────────────────────
     log.info("ghost_dashboard_shutting_down")
+    
+    # Stop resilience monitoring
+    try:
+        await _session_mgr.stop_resilience()
+        log.info("resilience_monitoring_stopped")
+    except Exception as e:
+        log.warning("resilience_shutdown_failed", error=str(e))
+    
     await close_db()
     if _docker_mgr:
         _docker_mgr.close()
@@ -187,6 +202,52 @@ def create_app() -> FastAPI:
         app.include_router(create_beacon_router(_canary_mgr, _telemetry))
         app.include_router(create_dashboard_router(_session_mgr, _ws_manager))
         app.include_router(create_ws_router(_ws_manager))
+
+    # ── Resilience API Endpoints ───────────────────────────────────────────────
+
+    @app.post("/heartbeat", tags=["resilience"])
+    async def heartbeat() -> dict:
+        """Record heartbeat from dashboard frontend."""
+        if _session_mgr:
+            _session_mgr.record_heartbeat()
+        return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+    @app.get("/network-status", tags=["resilience"])
+    async def network_status() -> dict:
+        """Check network seizure detection status and anomalies."""
+        if not _session_mgr:
+            return {"error": "session_manager_not_initialized"}
+        
+        anomalies = _session_mgr.detect_network_anomalies()
+        return {
+            "network_seized": _session_mgr.is_network_seized,
+            "anomalies": anomalies,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    @app.get("/cached-reports", tags=["resilience"])
+    async def list_cached_reports() -> dict:
+        """List all offline-cached session reports."""
+        if not _session_mgr:
+            return {"error": "session_manager_not_initialized"}
+        
+        cached_ids = _session_mgr.list_cached_reports()
+        return {
+            "cached_reports": cached_ids,
+            "count": len(cached_ids)
+        }
+
+    @app.get("/cached-report/{session_id}", tags=["resilience"])
+    async def get_cached_report(session_id: str) -> dict:
+        """Retrieve a specific offline-cached report."""
+        if not _session_mgr:
+            return {"error": "session_manager_not_initialized"}
+        
+        report = _session_mgr.get_cached_report(session_id)
+        if report is None:
+            return {"error": "report_not_found", "session_id": session_id}
+        
+        return report
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict:
