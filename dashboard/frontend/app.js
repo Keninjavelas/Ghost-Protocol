@@ -871,16 +871,174 @@ async function loadInitialSessions() {
 
 async function runDemo() {
     const btn = document.getElementById('demo-btn');
-    btn.textContent = '⏳ Running…';
+    const originalText = btn.textContent;
+    btn.textContent = '⏳ Running Demo...';
     btn.disabled = true;
+    
     try {
-        await fetch('/ws-test');
+        // Call the new full demo script endpoint
+        const response = await fetch('/api/demo/run-full-script', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Demo failed: ${response.statusText}`);
+        }
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            btn.textContent = '✓ Demo Complete!';
+            
+            // Display success notification
+            showNotification(
+                'Demo Script Completed Successfully',
+                `Session: ${result.session_id.slice(0, 8)}...\n` +
+                `Commands: ${result.commands_executed}\n` +
+                `Threat Level: ${result.threat_level}\n` +
+                `Risk Score: ${result.risk_score.toFixed(1)}`,
+                'success'
+            );
+            
+            // Display the intelligence report
+            if (result.report) {
+                displayIntelligenceReport(result.report, result.session_id);
+            }
+            
+            // Refresh the session list
+            setTimeout(() => {
+                fetchAndPopulateSessions();
+            }, 1000);
+            
+        } else {
+            btn.textContent = '✗ Demo Failed';
+            showNotification(
+                'Demo Script Failed',
+                result.message || result.error || 'Unknown error',
+                'error'
+            );
+        }
+        
+    } catch (err) {
+        console.error('[ghost] Demo script error:', err);
+        btn.textContent = '✗ Demo Failed';
+        showNotification(
+            'Demo Script Error',
+            err.message || 'Network or server error',
+            'error'
+        );
     } finally {
+        // Reset button after 5 seconds
         setTimeout(() => {
-            btn.textContent = '▶ DEMO MODE';
+            btn.textContent = originalText;
             btn.disabled = false;
-        }, 10000);
+        }, 5000);
     }
+}
+
+function showNotification(title, message, type = 'info') {
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.innerHTML = `
+        <div class="notification-header">
+            <strong>${esc(title)}</strong>
+            <button class="notification-close" onclick="this.parentElement.parentElement.remove()">×</button>
+        </div>
+        <div class="notification-body">${esc(message).replace(/\n/g, '<br>')}</div>
+    `;
+    
+    // Add to page
+    let container = document.getElementById('notification-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'notification-container';
+        container.style.position = 'fixed';
+        container.style.top = '80px';
+        container.style.right = '20px';
+        container.style.zIndex = '10000';
+        document.body.appendChild(container);
+    }
+    
+    container.appendChild(notification);
+    
+    // Auto-remove after 8 seconds
+    setTimeout(() => {
+        if (notification.parentElement) {
+            notification.style.opacity = '0';
+            notification.style.transform = 'translateX(400px)';
+            setTimeout(() => notification.remove(), 300);
+        }
+    }, 8000);
+}
+
+function displayIntelligenceReport(report, sessionId) {
+    // Create report modal/overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'report-overlay';
+    overlay.innerHTML = `
+        <div class="report-modal">
+            <div class="report-header">
+                <h2>🎯 Intelligence Report</h2>
+                <button class="report-close" onclick="this.closest('.report-overlay').remove()">×</button>
+            </div>
+            <div class="report-content">
+                <div class="report-section">
+                    <h3>Executive Summary</h3>
+                    <p>${esc(report.executive_summary || 'No summary available')}</p>
+                </div>
+                
+                ${report.techniques_used && report.techniques_used.length > 0 ? `
+                <div class="report-section">
+                    <h3>MITRE ATT&CK Techniques</h3>
+                    <ul class="technique-list">
+                        ${report.techniques_used.map(t => `
+                            <li><strong>${esc(t.id || 'Unknown')}</strong>: ${esc(t.name || 'Unknown technique')}</li>
+                        `).join('')}
+                    </ul>
+                </div>
+                ` : ''}
+                
+                ${report.intent_analysis ? `
+                <div class="report-section">
+                    <h3>Intent Analysis</h3>
+                    <p><strong>Attacker Type:</strong> ${esc(report.intent_analysis.attacker_type || 'Unknown')}</p>
+                    <p><strong>Objective:</strong> ${esc(report.intent_analysis.primary_objective || 'Unknown')}</p>
+                    <p><strong>Sophistication:</strong> ${esc(report.intent_analysis.sophistication_level || 'Unknown')}</p>
+                </div>
+                ` : ''}
+                
+                ${report.threat_score ? `
+                <div class="report-section">
+                    <h3>Threat Assessment</h3>
+                    <p><strong>Risk Score:</strong> ${report.threat_score.risk_score || 0} / 100</p>
+                    <p><strong>Threat Level:</strong> <span class="threat-badge threat-${(report.threat_score.threat_level || 'unknown').toLowerCase()}">${esc(report.threat_score.threat_level || 'UNKNOWN')}</span></p>
+                </div>
+                ` : ''}
+                
+                ${report.mitigation_suggestions && report.mitigation_suggestions.length > 0 ? `
+                <div class="report-section">
+                    <h3>Mitigation Recommendations</h3>
+                    <ul class="mitigation-list">
+                        ${report.mitigation_suggestions.map(m => `<li>${esc(m)}</li>`).join('')}
+                    </ul>
+                </div>
+                ` : ''}
+            </div>
+            <div class="report-footer">
+                <button class="btn-primary" onclick="downloadReport('${sessionId}')">Download Report</button>
+                <button class="btn-secondary" onclick="this.closest('.report-overlay').remove()">Close</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+}
+
+function downloadReport(sessionId) {
+    // Trigger download of the report
+    window.open(`/report/${sessionId}`, '_blank');
 }
 
 /* ═══════════════════════════════════════════════

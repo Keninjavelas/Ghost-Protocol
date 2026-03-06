@@ -715,4 +715,177 @@ def create_dashboard_router(
         asyncio.create_task(_run())
         return {"status": "demo_started", "events": str(len(script))}
 
+    # ── Full Demo Script ──────────────────────────────────────────────────────
+    @router.post("/api/demo/run-full-script", tags=["demo"])
+    async def run_full_demo_script() -> dict[str, Any]:
+        """
+        Execute a complete attacker simulation with realistic command sequence.
+        Generates and returns the final intelligence report.
+        
+        This endpoint:
+        1. Creates a new honeypot session
+        2. Executes a scripted attack sequence through the AI pipeline
+        3. Generates the final intelligence report
+        4. Returns session ID and report data for dashboard display
+        """
+        from ai_core.report_generator import ReportGenerator
+        
+        log.info("demo_script_started", trigger="api_endpoint")
+        
+        # Create a new session for the demo
+        source_ip = "203.0.113.42"  # TEST-NET-1 (RFC 5737)
+        username = "admin"
+        
+        try:
+            session_state = await session_manager.create_session(source_ip, username)
+            sid = session_state.session_id
+            
+            log.info("demo_session_created", session_id=str(sid))
+            
+            # Broadcast session start
+            if ws_manager:
+                await ws_manager.broadcast(
+                    ws_manager.make_event(
+                        "session",
+                        str(sid),
+                        {
+                            "action": "started",
+                            "source_ip": source_ip,
+                            "username": username,
+                        },
+                    )
+                )
+            
+            # Demo attack script - realistic attacker behavior progression
+            demo_commands = [
+                "whoami",                                    # Initial orientation
+                "pwd",                                        # Current location
+                "uname -a",                                  # System info
+                "ls -la",                                    # Directory listing
+                "cat /etc/passwd",                           # Credential reconnaissance
+                "history",                                   # Command history
+                "ps aux",                                    # Process discovery
+                "netstat -tulpn",                            # Network connections
+                "find / -name '*password*' 2>/dev/null",   # Credential hunting
+                "cat /home/admin/.ssh/id_rsa",              # SSH key access
+                "cat /var/backups/customer_db.sql",         # Database access
+                "sudo su -",                                 # Privilege escalation
+            ]
+            
+            # Get the command interceptor from app state
+            # We need to access it via the request context
+            # Since we can't access request.app.state directly here,
+            # we'll get the interceptor from the session_manager's stored reference
+            
+            # Import interceptor dependencies
+            from interception.command_interceptor import CommandInterceptor
+            from ai_core.llm_client import LLMClient
+            from ai_core.intent_inference import IntentInferenceEngine
+            from ai_core.environment_shaper import EnvironmentShaper
+            from ai_core.mitre_mapper import MitreMapper
+            from ai_core.threat_scorer import ThreatScorer
+            from ai_core.response_generator import ResponseGenerator
+            from config.settings import settings
+            
+            # Create temporary instances for demo execution
+            llm = LLMClient(
+                base_url=settings.OLLAMA_BASE_URL,
+                model=settings.OLLAMA_MODEL,
+                temperature=settings.OLLAMA_TEMPERATURE,
+                timeout_seconds=settings.OLLAMA_TIMEOUT_SECONDS,
+            )
+            
+            intent_engine = IntentInferenceEngine(llm)
+            env_shaper = EnvironmentShaper(llm)
+            mitre_mapper = MitreMapper(llm)
+            threat_scorer = ThreatScorer()
+            response_gen = ResponseGenerator()
+            report_gen = ReportGenerator(llm)
+            
+            # Create telemetry logger (lightweight for demo)
+            from telemetry.logger import TelemetryLogger
+            telemetry = TelemetryLogger()
+            
+            interceptor = CommandInterceptor(
+                session_manager=session_manager,
+                llm_client=llm,
+                intent_engine=intent_engine,
+                env_shaper=env_shaper,
+                mitre_mapper=mitre_mapper,
+                threat_scorer=threat_scorer,
+                response_generator=response_gen,
+                report_generator=report_gen,
+                telemetry=telemetry,
+                ws_manager=ws_manager,
+            )
+            
+            log.info("demo_processing_commands", total_commands=len(demo_commands))
+            
+            # Process each command through the AI pipeline
+            for idx, cmd in enumerate(demo_commands, 1):
+                try:
+                    log.debug("demo_command_processing", command=cmd, step=f"{idx}/{len(demo_commands)}")
+                    
+                    response = await interceptor.process(session_state, cmd)
+                    
+                    log.debug("demo_command_completed", command=cmd, response_length=len(response))
+                    
+                    # Small delay between commands for realistic timing
+                    await asyncio.sleep(0.3)
+                    
+                except Exception as e:
+                    log.warning("demo_command_failed", command=cmd, error=str(e))
+                    continue
+            
+            # Close the session
+            await session_manager.close_session(sid)
+            
+            log.info("demo_session_closed", session_id=str(sid))
+            
+            # Broadcast session end
+            if ws_manager:
+                await ws_manager.broadcast(
+                    ws_manager.make_event(
+                        "session",
+                        str(sid),
+                        {
+                            "action": "ended",
+                            "reason": "demo_completed",
+                        },
+                    )
+                )
+            
+            # Generate the intelligence report
+            try:
+                report_data = await report_gen.generate(session_state)
+                log.info("demo_report_generated", session_id=str(sid))
+            except Exception as e:
+                log.error("demo_report_generation_failed", session_id=str(sid), error=str(e))
+                report_data = {
+                    "error": "Report generation failed",
+                    "details": str(e),
+                }
+            
+            # Return comprehensive demo results
+            return {
+                "status": "success",
+                "session_id": str(sid),
+                "commands_executed": len(demo_commands),
+                "source_ip": source_ip,
+                "username": username,
+                "threat_level": session_state.threat_level,
+                "risk_score": session_state.risk_score,
+                "attacker_type": session_state.attacker_type,
+                "primary_objective": session_state.primary_objective,
+                "report": report_data,
+            }
+            
+        except Exception as e:
+            log.error("demo_script_failed", error=str(e), exc_info=True)
+            return {
+                "status": "error",
+                "error": str(e),
+                "message": "Demo script execution failed",
+            }
+
     return router
