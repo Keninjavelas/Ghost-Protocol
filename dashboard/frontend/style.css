@@ -295,6 +295,199 @@ html, body {
   transform: translateY(-1px);
 }
 
+/* ── Run Demo Script Button (Header) ───────────────────────── */
+.run-demo-btn {
+  padding: 6px 16px;
+  background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
+  color: var(--text-white);
+  border: none;
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--sans);
+  cursor: pointer;
+  transition: all var(--transition);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  box-shadow: 0 0 12px rgba(167, 139, 250, 0.3);
+  margin-left: 12px;
+}
+.run-demo-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 20px rgba(167, 139, 250, 0.5);
+}
+.run-demo-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+.run-demo-btn.running {
+  background: linear-gradient(135deg, var(--orange-alert), var(--yellow-warning));
+  animation: pulse-glow 1.5s ease-in-out infinite;
+}
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 12px rgba(251, 146, 60, 0.3); }
+  50% { box-shadow: 0 0 24px rgba(251, 146, 60, 0.6); }
+}
+
+/* ── Demo Progress Bar ──────────────────────────────────────── */
+.demo-progress-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  padding: 8px 20px;
+  z-index: 999;
+  transition: transform .3s ease;
+}
+.demo-progress-bar.hidden {
+  transform: translateY(100%);
+  pointer-events: none;
+}
+.demo-progress-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.demo-progress-text {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent-purple);
+  white-space: nowrap;
+  min-width: 220px;
+}
+.demo-progress-track {
+  flex: 1;
+  height: 6px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.demo-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+/* ── Report Modal ───────────────────────────────────────────── */
+.report-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity .2s ease;
+}
+.report-overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+.report-modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: 90vw;
+  max-width: 860px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-lg);
+}
+.report-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.report-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.report-title {
+  font-family: var(--sans);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent-purple);
+}
+.report-pdf-btn {
+  padding: 6px 14px;
+  background: linear-gradient(135deg, var(--green-success), #059669);
+  color: var(--text-white);
+  border: none;
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--sans);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.report-pdf-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+}
+.report-pdf-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.report-close-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  transition: all var(--transition);
+}
+.report-close-btn:hover {
+  color: var(--red-critical);
+  border-color: var(--red-critical);
+}
+.report-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  font-family: var(--sans);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.report-modal-body h3 {
+  color: var(--accent-blue);
+  font-size: 14px;
+  margin: 18px 0 8px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.report-modal-body .report-section {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin: 8px 0;
+}
+.report-modal-body .report-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  margin: 2px 4px 2px 0;
+}
+.report-badge.critical { background: var(--red-light); color: var(--red-critical); }
+.report-badge.high { background: var(--yellow-light); color: var(--yellow-warning); }
+.report-badge.medium { background: var(--accent-blue-light); color: var(--accent-blue); }
+.report-badge.low { background: var(--green-light); color: var(--green-success); }
+
 /* ── Session Snapshot ───────────────────────────────────────– */
 .snapshot-grid {
   display: grid;

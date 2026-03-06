@@ -585,19 +585,45 @@ def create_app() -> FastAPI:
         
         # Check SSH server
         try:
+            import errno
             import socket
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            probe_host = settings.SSH_HOST
-            if probe_host in {"0.0.0.0", "::", ""}:
-                probe_host = "127.0.0.1"
-            result = sock.connect_ex((probe_host, settings.SSH_PORT))
-            sock.close()
-            health_status["services"]["ssh_honeypot"] = "listening" if result == 0 else "not_listening"
-            if result != 0:
-                health_status["status"] = "degraded"
+            configured_host = (settings.SSH_HOST or "").strip()
+            candidates = ["127.0.0.1", "::1", "localhost"]
+            if configured_host and configured_host not in {"0.0.0.0", "::"}:
+                candidates.insert(0, configured_host)
+
+            # Probe multiple loopback paths because Windows can expose listeners
+            # differently across IPv4/IPv6.
+            listening = False
+            last_error = ""
+            for host in dict.fromkeys(candidates):
+                try:
+                    with socket.create_connection((host, settings.SSH_PORT), timeout=0.75):
+                        listening = True
+                        break
+                except Exception as exc:
+                    last_error = str(exc)
+
+            # Fallback: if probe failed but port is already bound, treat as listening.
+            if not listening:
+                probe_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                probe_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                try:
+                    probe_sock.bind(("0.0.0.0", settings.SSH_PORT))
+                except OSError as exc:
+                    if exc.errno in {errno.EADDRINUSE, 10048}:
+                        listening = True
+                    else:
+                        last_error = str(exc)
+                finally:
+                    probe_sock.close()
+
+            health_status["services"]["ssh_honeypot"] = "listening" if listening else "not_listening"
+            if not listening and last_error:
+                health_status["services"]["ssh_honeypot_error"] = last_error[:100]
         except Exception as e:
             health_status["services"]["ssh_honeypot"] = f"error: {str(e)[:100]}"
-            health_status["status"] = "degraded"
+            health_status["services"]["ssh_honeypot_error"] = str(e)[:100]
         
         # Check WebSocket manager
         health_status["services"]["websocket"] = "ok" if _ws_manager else "not_initialized"
@@ -632,7 +658,10 @@ def create_app() -> FastAPI:
     @app.get("/", include_in_schema=False)
     async def serve_dashboard() -> FileResponse:
         """Serve the frontend SPA."""
-        return FileResponse(str(_FRONTEND_DIR / "index.html"))
+        return FileResponse(
+            str(_FRONTEND_DIR / "index.html"),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 
     # Mount static assets AFTER all API routes so they don't shadow them
     if _FRONTEND_DIR.exists():

@@ -40,8 +40,11 @@ const TACTIC_SHORT = {
     'Impact': 'Impact',
 };
 
-const WS_URL = `ws://${location.host}/ws`;
+const WS_SCHEME = location.protocol === 'https:' ? 'wss' : 'ws';
+const WS_PORT = location.port ? `:${location.port}` : '';
+const WS_URL = `${WS_SCHEME}://localhost${WS_PORT}/ws`;
 const MAX_RECONNECT_DELAY_MS = 30_000;
+const HEALTH_POLL_MS = 5_000;
 const MAX_TERMINAL_ENTRIES = 200;
 const MAX_TIMELINE_ENTRIES = 100;
 const MAX_BEACON_ENTRIES = 50;
@@ -54,6 +57,11 @@ const state = {
     ws: null,
     reconnectTimer: null,
     reconnectCount: 0,
+    healthPollTimer: null,
+    wsConnected: false,
+    demoRunning: false,
+    demoSessionId: null,
+    demoReport: null,
     selectedSession: null,          // session_id string | null
     sessions: {},            // session_id → { source_ip, username, status }
     sessionData: {},         // session_id → snapshot data
@@ -73,10 +81,19 @@ const state = {
 function connect() {
     if (state.ws && state.ws.readyState === WebSocket.OPEN) return;
 
-    state.ws = new WebSocket(WS_URL);
+    console.log('[ghost] WS connecting to', WS_URL);
+    try {
+        state.ws = new WebSocket(WS_URL);
+    } catch (err) {
+        console.error('[ghost] WS constructor failed', err);
+        scheduleReconnect();
+        return;
+    }
 
     state.ws.onopen = () => {
+        console.log('[ghost] WS connected');
         state.reconnectCount = 0;
+        state.wsConnected = true;
         setLive(true);
     };
 
@@ -85,14 +102,39 @@ function connect() {
         catch (err) { console.warn('[ghost] bad WS message', err); }
     };
 
-    state.ws.onerror = () => { };   // onclose fires after onerror; handle there
+    state.ws.onerror = (err) => {
+        console.warn('[ghost] WS error', err);
+    };
 
     state.ws.onclose = () => {
+        console.log('[ghost] WS closed');
+        state.wsConnected = false;
         setLive(false);
-        const delay = Math.min(500 * Math.pow(2, state.reconnectCount), MAX_RECONNECT_DELAY_MS);
-        state.reconnectCount++;
-        state.reconnectTimer = setTimeout(connect, delay);
+        scheduleReconnect();
     };
+}
+
+function scheduleReconnect() {
+    const delay = Math.min(500 * Math.pow(2, state.reconnectCount), MAX_RECONNECT_DELAY_MS);
+    state.reconnectCount++;
+    state.reconnectTimer = setTimeout(connect, delay);
+}
+
+/* Health-poll fallback: if WS cannot connect, poll /health
+   and still show LIVE when the backend API is reachable. */
+function startHealthPoll() {
+    if (state.healthPollTimer) return;
+    async function poll() {
+        try {
+            const r = await fetch('/health', { cache: 'no-store' });
+            if (r.ok) setLive(true);
+            else      setLive(state.wsConnected);
+        } catch {
+            if (!state.wsConnected) setLive(false);
+        }
+    }
+    poll();
+    state.healthPollTimer = setInterval(poll, HEALTH_POLL_MS);
 }
 
 /* ═══════════════════════════════════════════════
@@ -103,11 +145,26 @@ function connect() {
 function routeEvent(ev) {
     const { type, session_id, timestamp, data } = ev;
 
-    // Session events always processed
-    if (type === 'session') { handleSession(session_id, data); return; }
+    // Demo status events are always global
+    if (type === 'demo_status') { handleDemoStatus(data); return; }
+    if (type === 'report_generated') { handleReportGenerated(data); return; }
 
-    // Most events are session-scoped; VPN security alerts are global.
-    if (state.selectedSession && session_id !== state.selectedSession && type !== 'vpn_security_alert') return;
+    // Session events always processed
+    if (type === 'session') {
+        handleSession(session_id, data);
+        // Auto-select demo session
+        if (data.action === 'started' && state.demoRunning) {
+            selectSession(session_id);
+        }
+        return;
+    }
+
+    // During demo, accept events from the demo session
+    if (state.demoRunning && state.demoSessionId === session_id) {
+        // Allow through
+    } else if (state.selectedSession && session_id !== state.selectedSession && type !== 'vpn_security_alert') {
+        return;
+    }
 
     switch (type) {
         case 'command': handleCommand(timestamp, data); break;
@@ -866,20 +923,220 @@ async function loadInitialSessions() {
 }
 
 /* ═══════════════════════════════════════════════
-   DEMO MODE
+   FULL AI DEMO
 ═══════════════════════════════════════════════ */
 
-async function runDemo() {
-    const btn = document.getElementById('demo-btn');
-    btn.textContent = '⏳ Running…';
+async function runFullDemo() {
+    const btn = document.getElementById('run-demo-btn');
+    const oldBtn = document.getElementById('demo-btn');
     btn.disabled = true;
+    btn.classList.add('running');
+    btn.textContent = '⏳ DEMO RUNNING…';
+    if (oldBtn) { oldBtn.disabled = true; oldBtn.textContent = '⏳ Running…'; }
+
+    state.demoRunning = true;
+    state.demoReport = null;
+
+    // Show progress bar
+    const bar = document.getElementById('demo-progress-bar');
+    const fill = document.getElementById('demo-progress-fill');
+    const txt = document.getElementById('demo-progress-text');
+    bar.classList.remove('hidden');
+    fill.style.width = '0%';
+    txt.textContent = 'Initializing AI Demo…';
+
     try {
-        await fetch('/ws-test');
+        const resp = await fetch('/demo/run-full', { method: 'POST', cache: 'no-store' });
+        if (!resp.ok) {
+            const err = await resp.text();
+            console.error('[ghost] Demo failed:', err);
+            txt.textContent = '❌ Demo failed — see console';
+            return;
+        }
+        const result = await resp.json();
+        state.demoReport = result.report;
+        state.demoSessionId = result.session_id;
+
+        // Show progress complete
+        fill.style.width = '100%';
+        txt.textContent = `✅ Demo complete — ${result.commands_processed} commands • Risk: ${result.final_risk_score?.toFixed(1)} • ${result.final_threat_level}`;
+
+        // Auto-open report after 1s
+        setTimeout(() => showReport(result.report), 1000);
+    } catch (err) {
+        console.error('[ghost] Demo error:', err);
+        txt.textContent = '❌ Demo error — check connection';
     } finally {
-        setTimeout(() => {
-            btn.textContent = '▶ DEMO MODE';
-            btn.disabled = false;
-        }, 10000);
+        state.demoRunning = false;
+        btn.disabled = false;
+        btn.classList.remove('running');
+        btn.textContent = '🚀 RUN DEMO SCRIPT';
+        if (oldBtn) { oldBtn.disabled = false; oldBtn.textContent = '▶ DEMO'; }
+
+        // Hide progress bar after 8s
+        setTimeout(() => bar.classList.add('hidden'), 8000);
+    }
+}
+
+/* Legacy small demo (timeline panel button) */
+async function runDemo() {
+    runFullDemo();
+}
+
+/* ── Demo Status Handler (progress from WebSocket) ─────────── */
+function handleDemoStatus(data) {
+    const fill = document.getElementById('demo-progress-fill');
+    const txt = document.getElementById('demo-progress-text');
+    const bar = document.getElementById('demo-progress-bar');
+    if (!fill || !txt || !bar) return;
+
+    bar.classList.remove('hidden');
+
+    if (data.phase === 'processing' && data.step && data.total) {
+        const pct = Math.round((data.step / data.total) * 85); // reserve 15% for report
+        fill.style.width = pct + '%';
+        txt.textContent = data.message || `Processing ${data.step}/${data.total}…`;
+    } else if (data.phase === 'report') {
+        fill.style.width = '88%';
+        txt.textContent = '🧠 ' + (data.message || 'Generating Intelligence Report…');
+    } else if (data.phase === 'complete') {
+        fill.style.width = '100%';
+        txt.textContent = '✅ ' + (data.message || 'Demo complete');
+    } else if (data.phase === 'starting') {
+        fill.style.width = '2%';
+        txt.textContent = '🚀 ' + (data.message || 'Starting…');
+    }
+}
+
+/* ── Report Generated Handler ──────────────────────────────── */
+function handleReportGenerated(data) {
+    const report = data.report || data;
+    state.demoReport = report;
+    console.log('[ghost] Report generated:', report);
+}
+
+/* ── Report Display ────────────────────────────────────────── */
+function showReport(report) {
+    if (!report) return;
+    const overlay = document.getElementById('report-overlay');
+    const body = document.getElementById('report-body');
+    if (!overlay || !body) return;
+
+    let html = '';
+
+    // Executive Summary
+    if (report.executive_summary) {
+        html += `<h3>Executive Summary</h3>
+        <div class="report-section">${esc(report.executive_summary)}</div>`;
+    }
+
+    // Attacker Profile
+    const prof = report.attacker_profile || {};
+    if (prof.type || report.attacker_type) {
+        html += `<h3>Attacker Profile</h3><div class="report-section">
+        <div><strong>Type:</strong> ${esc(prof.type || report.attacker_type || '—')}</div>
+        <div><strong>Objective:</strong> ${esc(prof.objective || report.primary_objective || '—')}</div>
+        <div><strong>Sophistication:</strong> ${esc(prof.sophistication || report.sophistication_level || '—')}</div>
+        <div><strong>Nation-State:</strong> ${prof.likely_nation_state ? '⚠ Yes' : 'No'}</div>
+        </div>`;
+    }
+
+    // Threat Assessment
+    const ta = report.threat_assessment || {};
+    if (ta.risk_score !== undefined || ta.threat_level) {
+        const lvl = (ta.threat_level || '').toUpperCase();
+        const badge = lvl === 'CRITICAL' ? 'critical' : lvl === 'HIGH' ? 'high'
+                    : lvl === 'MEDIUM' || lvl === 'MED' ? 'medium' : 'low';
+        html += `<h3>Threat Assessment</h3><div class="report-section">
+        <div><strong>Risk Score:</strong> ${ta.risk_score ?? '—'}/100
+            <span class="report-badge ${badge}">${lvl || 'UNKNOWN'}</span></div>
+        <div><strong>Immediate Danger:</strong> ${ta.immediate_danger ? '⚠ YES' : 'No'}</div>
+        <div><strong>Data at Risk:</strong> ${(ta.data_at_risk || []).map(d => esc(d)).join(', ') || '—'}</div>
+        </div>`;
+    }
+
+    // Techniques Used
+    const techs = report.techniques_used || [];
+    if (techs.length) {
+        html += `<h3>MITRE ATT&CK Techniques (${techs.length})</h3><div class="report-section">`;
+        for (const t of techs) {
+            html += `<div><span class="report-badge medium">${esc(t.mitre_id || t.id || '')}</span>
+            <strong>${esc(t.name || '')}</strong> — ${esc(t.description || '')}</div>`;
+        }
+        html += `</div>`;
+    }
+
+    // Intent Analysis
+    const ia = report.intent_analysis || {};
+    if (ia.primary_goal) {
+        html += `<h3>Intent Analysis</h3><div class="report-section">
+        <div><strong>Primary Goal:</strong> ${esc(ia.primary_goal)}</div>
+        <div><strong>Secondary Goals:</strong> ${(ia.secondary_goals || []).map(g => esc(g)).join(', ') || '—'}</div>
+        <div><strong>Behavioral Patterns:</strong> ${esc(ia.behavioral_patterns || '—')}</div>
+        </div>`;
+    }
+
+    // Mitigation Suggestions
+    const mits = report.mitigation_suggestions || [];
+    if (mits.length) {
+        html += `<h3>Mitigation Suggestions</h3><div class="report-section"><ol>`;
+        for (const m of mits) html += `<li>${esc(m)}</li>`;
+        html += `</ol></div>`;
+    }
+
+    // IOCs
+    const iocs = report.iocs || {};
+    if (iocs.ip_addresses?.length || iocs.usernames?.length || iocs.tools_or_commands?.length) {
+        html += `<h3>Indicators of Compromise</h3><div class="report-section">`;
+        if (iocs.ip_addresses?.length)
+            html += `<div><strong>IP Addresses:</strong> ${iocs.ip_addresses.map(ip => `<span class="report-badge critical">${esc(ip)}</span>`).join(' ')}</div>`;
+        if (iocs.usernames?.length)
+            html += `<div><strong>Usernames:</strong> ${iocs.usernames.map(u => `<span class="report-badge high">${esc(u)}</span>`).join(' ')}</div>`;
+        if (iocs.tools_or_commands?.length)
+            html += `<div><strong>Tools/Commands:</strong> ${iocs.tools_or_commands.map(c => `<code>${esc(c)}</code>`).join(', ')}</div>`;
+        html += `</div>`;
+    }
+
+    // Session metadata
+    html += `<h3>Report Metadata</h3><div class="report-section">
+    <div><strong>Session ID:</strong> <code>${esc(report.session_id || '—')}</code></div>
+    <div><strong>Generated:</strong> ${report.generated_at ? formatTime(report.generated_at) : '—'}</div>
+    </div>`;
+
+    body.innerHTML = html;
+    overlay.classList.remove('hidden');
+}
+
+function closeReport() {
+    const overlay = document.getElementById('report-overlay');
+    if (overlay) overlay.classList.add('hidden');
+}
+
+async function downloadReportPDF() {
+    if (!state.demoReport) return;
+    const btn = document.getElementById('report-pdf-btn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Generating…'; }
+    try {
+        const resp = await fetch('/report/pdf', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(state.demoReport)
+        });
+        if (!resp.ok) throw new Error('PDF generation failed');
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Ghost_Protocol_Intelligence_Report_${new Date().toISOString().slice(0,10)}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        console.error('PDF download error:', e);
+        alert('Failed to generate PDF report.');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '📄 Download PDF'; }
     }
 }
 
@@ -975,6 +1232,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Load initial sessions and connect
     loadInitialSessions();
     connect();
+    startHealthPoll();
 
     // VPN security polling
     fetchVPNSecurityStatus();

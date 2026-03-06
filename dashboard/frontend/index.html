@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>Ghost Protocol – AI Cyber Defense Console</title>
   <meta name="description" content="Real-time AI Cyber Defense Command Center for Ghost Protocol Stage 2" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -15,7 +18,9 @@
 <header class="header">
   <div class="header-left">
     <span class="logo">⬡ GHOST PROTOCOL</span>
-    
+    <button class="run-demo-btn" id="run-demo-btn" onclick="runFullDemo()">
+      🚀 RUN DEMO SCRIPT
+    </button>
   </div>
 
   <div class="header-center">
@@ -376,6 +381,47 @@
 
 </main><!-- /dashboard-frame -->
 
-<script src="/static/app.js"></script>
+<!-- ═══════════════════  REPORT MODAL  ═══════════════════ -->
+<div id="report-overlay" class="report-overlay hidden">
+  <div class="report-modal">
+    <div class="report-modal-header">
+      <span class="report-title">📋 AI Intelligence Report</span>
+      <div class="report-header-actions">
+        <button class="report-pdf-btn" id="report-pdf-btn" onclick="downloadReportPDF()">📄 Download PDF</button>
+        <button class="report-close-btn" onclick="closeReport()">✕</button>
+      </div>
+    </div>
+    <div class="report-modal-body" id="report-body">
+      <div class="empty-state">No report generated yet.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════  DEMO PROGRESS BAR  ═══════════════════ -->
+<div id="demo-progress-bar" class="demo-progress-bar hidden">
+  <div class="demo-progress-inner">
+    <span id="demo-progress-text" class="demo-progress-text">Initializing…</span>
+    <div class="demo-progress-track">
+      <div id="demo-progress-fill" class="demo-progress-fill" style="width:0%"></div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js?v=20260306d"></script>
+<script>
+// Inline fallback: if app.js WS doesn't connect within 4s, poll /health
+setTimeout(function() {
+  var el = document.getElementById('live-indicator');
+  var txt = document.getElementById('live-text');
+  if (txt && txt.textContent === 'OFFLINE') {
+    console.log('[ghost-inline] WS still offline after 4s, starting health poll fallback');
+    setInterval(function() {
+      fetch('/health', {cache:'no-store'}).then(function(r) {
+        if (r.ok) { el.className='live-indicator live'; txt.textContent='LIVE'; }
+      }).catch(function(){});
+    }, 3000);
+  }
+}, 4000);
+</script>
 </body>
 </html>
