@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from pathlib import Path
 
@@ -47,6 +47,14 @@ from ai_core.report_generator import ReportGenerator
 from interception.command_interceptor import CommandInterceptor
 from gateway.ssh_server import GhostSSHServer
 
+# ── Detection System ─────────────────────────────────────────────────────────
+from detection_orchestrator import DetectionOrchestrator
+import detection_api
+from threat_websocket import websocket_handler
+
+# ── Optional Security Systems ────────────────────────────────────────────────
+# Imported lazily at runtime so core dashboard can start without optional deps.
+
 log = structlog.get_logger(__name__)
 
 # ── Shared services (module-level for lifespan access) ─────────────────────────
@@ -55,15 +63,52 @@ _session_mgr: SessionManager | None = None
 _telemetry: TelemetryLogger | None = None
 _canary_mgr: CanaryManager | None = None
 _ws_manager: ConnectionManager | None = None
+_detection_orchestrator: DetectionOrchestrator | None = None
+_network_defense: Any | None = None
+_vpn_security: Any | None = None
 _ssh_server_handle: asyncio.Task | None = None
 
 _FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
 
+# ── Network Defense Callbacks ──────────────────────────────────────────────────
+async def _network_defense_alert_callback(alert_data: dict) -> None:
+    """Callback for network defense alerts to broadcast to dashboard."""
+    if _ws_manager:
+        await _ws_manager.broadcast(alert_data)
+
+
+def _create_network_defense_system() -> Any:
+    """Create network defense instance with lazy import of optional deps."""
+    from network_defense import NetworkDefenseSystem
+
+    return NetworkDefenseSystem(
+        interface=settings.NETWORK_INTERFACE,
+        enable_ml=settings.NETWORK_DEFENSE_ML_ENABLED,
+        ml_model_path=settings.NETWORK_DEFENSE_ML_MODEL_PATH,
+        enable_automated_response=settings.NETWORK_DEFENSE_AUTOMATED_RESPONSE,
+        response_dry_run=settings.NETWORK_DEFENSE_RESPONSE_DRY_RUN,
+        dashboard_callback=_network_defense_alert_callback,
+        alert_webhook_url=settings.NETWORK_DEFENSE_ALERT_WEBHOOK,
+        log_dir=settings.NETWORK_DEFENSE_LOG_DIR,
+    )
+
+
+def _create_vpn_security_coordinator() -> Any:
+    """Create VPN security coordinator with lazy import of optional deps."""
+    from vpn_security import VPNSecurityCoordinator
+
+    return VPNSecurityCoordinator(
+        interface=settings.VPN_SECURITY_INTERFACE,
+        poll_interval_seconds=settings.VPN_SECURITY_POLL_INTERVAL_SECONDS,
+        dashboard_callback=_network_defense_alert_callback,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Startup / shutdown lifecycle."""
-    global _docker_mgr, _session_mgr, _telemetry, _canary_mgr, _ws_manager, _ssh_server_handle
+    global _docker_mgr, _session_mgr, _telemetry, _canary_mgr, _ws_manager, _detection_orchestrator, _network_defense, _vpn_security, _ssh_server_handle
 
     configure_logging()
     log.info("ghost_dashboard_starting")
@@ -74,6 +119,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _telemetry = TelemetryLogger()
     _canary_mgr = CanaryManager()
     _ws_manager = ConnectionManager()
+    _detection_orchestrator = DetectionOrchestrator()
 
     # Wire up AI core
     llm = LLMClient()
@@ -104,6 +150,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.telemetry = _telemetry
     app.state.canary_manager = _canary_mgr
     app.state.ws_manager = _ws_manager
+    app.state.detection_orchestrator = _detection_orchestrator
 
     # ── Validate Service Health ───────────────────────────────────────────
     # Database health check
@@ -154,11 +201,76 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         log.warning("resilience_startup_failed", error=str(e))
 
+    # Start threat detection system
+    try:
+        await _detection_orchestrator.start()
+        log.info("threat_detection_system_started")
+    except Exception as e:
+        log.warning("threat_detection_startup_failed", error=str(e))
+
+    # Start network defense system (if enabled)
+    if settings.NETWORK_DEFENSE_ENABLED:
+        try:
+            _network_defense = _create_network_defense_system()
+            await _network_defense.start()
+            log.info(
+                "network_defense_system_started",
+                interface=settings.NETWORK_INTERFACE,
+                ml_enabled=settings.NETWORK_DEFENSE_ML_ENABLED,
+                automated_response=settings.NETWORK_DEFENSE_AUTOMATED_RESPONSE
+            )
+        except Exception as e:
+            log.error("network_defense_startup_failed", error=str(e))
+            _network_defense = None
+    else:
+        log.info("network_defense_disabled")
+
+    # Start VPN security platform (if enabled)
+    if settings.VPN_SECURITY_ENABLED:
+        try:
+            _vpn_security = _create_vpn_security_coordinator()
+            await _vpn_security.start()
+            app.state.vpn_security = _vpn_security
+            log.info(
+                "vpn_security_platform_started",
+                interface=settings.VPN_SECURITY_INTERFACE,
+                poll_interval_seconds=settings.VPN_SECURITY_POLL_INTERVAL_SECONDS,
+            )
+        except Exception as e:
+            log.error("vpn_security_startup_failed", error=str(e))
+            _vpn_security = None
+    else:
+        log.info("vpn_security_platform_disabled")
+
     log.info("ghost_dashboard_ready", port=settings.DASHBOARD_PORT)
     yield
 
     # ── Shutdown ───────────────────────────────────────────────────────────────
     log.info("ghost_dashboard_shutting_down")
+    
+    # Stop network defense system
+    if _network_defense:
+        try:
+            await _network_defense.stop()
+            log.info("network_defense_system_stopped")
+        except Exception as e:
+            log.warning("network_defense_shutdown_failed", error=str(e))
+
+    # Stop VPN security platform
+    if _vpn_security:
+        try:
+            await _vpn_security.stop()
+            log.info("vpn_security_platform_stopped")
+        except Exception as e:
+            log.warning("vpn_security_shutdown_failed", error=str(e))
+    
+    # Stop threat detection system
+    try:
+        if _detection_orchestrator:
+            await _detection_orchestrator.stop()
+            log.info("threat_detection_system_stopped")
+    except Exception as e:
+        log.warning("threat_detection_shutdown_failed", error=str(e))
     
     # Stop resilience monitoring
     try:
@@ -170,7 +282,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await close_db()
     if _docker_mgr:
         _docker_mgr.close()
-
 
 # ── Application ────────────────────────────────────────────────────────────────
 
@@ -198,10 +309,17 @@ def create_app() -> FastAPI:
         assert _telemetry is not None
         assert _canary_mgr is not None
         assert _ws_manager is not None
+        assert _detection_orchestrator is not None
 
         app.include_router(create_beacon_router(_canary_mgr, _telemetry))
         app.include_router(create_dashboard_router(_session_mgr, _ws_manager))
         app.include_router(create_ws_router(_ws_manager))
+        app.include_router(detection_api.router)
+        
+        # Add detection WebSocket endpoint
+        @app.websocket("/ws/threats")
+        async def websocket_threats(websocket):
+            await websocket_handler(websocket)
 
     # ── Resilience API Endpoints ───────────────────────────────────────────────
 
@@ -249,6 +367,199 @@ def create_app() -> FastAPI:
         
         return report
 
+    # ── Network Defense API Endpoints ──────────────────────────────────────────
+
+    @app.post("/network-defense/start", tags=["network_defense"])
+    async def start_network_defense() -> dict:
+        """Manually start network defense system."""
+        global _network_defense
+        
+        if _network_defense and _network_defense.running:
+            return {"error": "network_defense_already_running"}
+        
+        if not settings.NETWORK_DEFENSE_ENABLED:
+            return {"error": "network_defense_disabled_in_config"}
+        
+        try:
+            _network_defense = _create_network_defense_system()
+            await _network_defense.start()
+            log.info("network_defense_started_manually")
+            return {"status": "started", "timestamp": datetime.now(timezone.utc).isoformat()}
+        except Exception as e:
+            log.error("network_defense_start_failed", error=str(e))
+            return {"error": str(e)}
+
+    @app.post("/network-defense/stop", tags=["network_defense"])
+    async def stop_network_defense() -> dict:
+        """Manually stop network defense system."""
+        if not _network_defense:
+            return {"error": "network_defense_not_running"}
+        
+        try:
+            await _network_defense.stop()
+            log.info("network_defense_stopped_manually")
+            return {"status": "stopped", "timestamp": datetime.now(timezone.utc).isoformat()}
+        except Exception as e:
+            log.error("network_defense_stop_failed", error=str(e))
+            return {"error": str(e)}
+
+    @app.get("/network-defense/status", tags=["network_defense"])
+    async def network_defense_status() -> dict:
+        """Get network defense system status."""
+        if not _network_defense:
+            return {
+                "running": False,
+                "enabled": settings.NETWORK_DEFENSE_ENABLED,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        
+        try:
+            status = _network_defense.get_status()
+            return status
+        except Exception as e:
+            log.error("network_defense_status_failed", error=str(e))
+            return {"error": str(e)}
+
+    @app.get("/network-defense/threats", tags=["network_defense"])
+    async def network_defense_threats(
+        threat_level: str | None = None,
+        min_score: float | None = None,
+        limit: int = 50
+    ) -> dict:
+        """Query detected network threats."""
+        if not _network_defense:
+            return {"error": "network_defense_not_running", "threats": []}
+        
+        try:
+            threats = _network_defense.query_threats(
+                threat_level=threat_level,
+                min_score=min_score,
+                limit=limit
+            )
+            return {
+                "threats": threats,
+                "count": len(threats),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        except Exception as e:
+            log.error("network_defense_threats_query_failed", error=str(e))
+            return {"error": str(e), "threats": []}
+
+    @app.get("/network-defense/recent", tags=["network_defense"])
+    async def recent_network_threats(limit: int = 20) -> dict:
+        """Get recent network threats."""
+        if not _network_defense:
+            return {"error": "network_defense_not_running", "threats": []}
+        
+        try:
+            threats = _network_defense.get_recent_threats(limit=limit)
+            return {
+                "threats": threats,
+                "count": len(threats),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        except Exception as e:
+            log.error("recent_threats_query_failed", error=str(e))
+            return {"error": str(e), "threats": []}
+
+    # ── VPN Security API Endpoints ───────────────────────────────────────────
+
+    @app.post("/vpn-security/start", tags=["vpn_security"])
+    async def start_vpn_security() -> dict:
+        """Start VPN security platform."""
+        global _vpn_security
+
+        if _vpn_security and _vpn_security.running:
+            return {"error": "vpn_security_already_running"}
+
+        if not settings.VPN_SECURITY_ENABLED:
+            return {"error": "vpn_security_disabled_in_config"}
+
+        try:
+            _vpn_security = _create_vpn_security_coordinator()
+            await _vpn_security.start()
+            app.state.vpn_security = _vpn_security
+            return {"status": "started", "timestamp": datetime.now(timezone.utc).isoformat()}
+        except Exception as e:
+            log.error("vpn_security_start_failed", error=str(e))
+            return {"error": str(e)}
+
+    @app.post("/vpn-security/stop", tags=["vpn_security"])
+    async def stop_vpn_security() -> dict:
+        """Stop VPN security platform."""
+        if not _vpn_security:
+            return {"error": "vpn_security_not_running"}
+
+        try:
+            await _vpn_security.stop()
+            app.state.vpn_security = None
+            return {"status": "stopped", "timestamp": datetime.now(timezone.utc).isoformat()}
+        except Exception as e:
+            log.error("vpn_security_stop_failed", error=str(e))
+            return {"error": str(e)}
+
+    @app.get("/vpn-security/status", tags=["vpn_security"])
+    async def vpn_security_status() -> dict:
+        """Get VPN security platform status."""
+        if not _vpn_security:
+            return {
+                "running": False,
+                "enabled": settings.VPN_SECURITY_ENABLED,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+        try:
+            return _vpn_security.get_status()
+        except Exception as e:
+            log.error("vpn_security_status_failed", error=str(e))
+            return {"error": str(e)}
+
+    @app.get("/vpn-security/findings", tags=["vpn_security"])
+    async def vpn_security_findings(
+        vpn_only: bool = False,
+        compromised_only: bool = False,
+        leak_only: bool = False,
+        min_anomaly_score: float | None = None,
+        limit: int = 100,
+    ) -> dict:
+        """Query VPN security findings."""
+        if not _vpn_security:
+            return {"error": "vpn_security_not_running", "findings": []}
+
+        try:
+            findings = _vpn_security.query_findings(
+                vpn_only=vpn_only,
+                compromised_only=compromised_only,
+                leak_only=leak_only,
+                min_anomaly_score=min_anomaly_score,
+                limit=limit,
+            )
+            return {
+                "findings": findings,
+                "count": len(findings),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as e:
+            log.error("vpn_security_findings_failed", error=str(e))
+            return {"error": str(e), "findings": []}
+
+    @app.get("/vpn-security/recent", tags=["vpn_security"])
+    async def vpn_security_recent(limit: int = 20) -> dict:
+        """Get recent VPN security findings."""
+        if not _vpn_security:
+            return {"error": "vpn_security_not_running", "findings": []}
+
+        try:
+            findings = _vpn_security.get_recent_findings(limit=limit)
+            return {
+                "findings": findings,
+                "count": len(findings),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as e:
+            log.error("vpn_security_recent_failed", error=str(e))
+            return {"error": str(e), "findings": []}
+
     @app.get("/health", tags=["meta"])
     async def health() -> dict:
         """Comprehensive health check endpoint for monitoring and startup validation."""
@@ -292,6 +603,19 @@ def create_app() -> FastAPI:
         health_status["services"]["session_manager"] = "ok" if _session_mgr else "not_initialized"
         if not _session_mgr:
             health_status["status"] = "degraded"
+        
+        # Check detection system
+        health_status["services"]["threat_detection"] = "ok" if _detection_orchestrator else "not_initialized"
+        if not _detection_orchestrator:
+            health_status["status"] = "degraded"
+
+        # Check VPN security platform
+        if settings.VPN_SECURITY_ENABLED:
+            health_status["services"]["vpn_security"] = "running" if (_vpn_security and _vpn_security.running) else "not_running"
+            if not (_vpn_security and _vpn_security.running):
+                health_status["status"] = "degraded"
+        else:
+            health_status["services"]["vpn_security"] = "disabled"
         
         return health_status
 

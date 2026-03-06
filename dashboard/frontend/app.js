@@ -63,6 +63,7 @@ const state = {
     beaconCount: 0,
     mitreHits: {},            // technique_id → cumulative confidence
     tacticHits: {},            // tactic → cumulative confidence (for cell intensity)
+    vpnFindings: [],
 };
 
 /* ═══════════════════════════════════════════════
@@ -105,14 +106,15 @@ function routeEvent(ev) {
     // Session events always processed
     if (type === 'session') { handleSession(session_id, data); return; }
 
-    // All other events filtered by selected session
-    if (state.selectedSession && session_id !== state.selectedSession) return;
+    // Most events are session-scoped; VPN security alerts are global.
+    if (state.selectedSession && session_id !== state.selectedSession && type !== 'vpn_security_alert') return;
 
     switch (type) {
         case 'command': handleCommand(timestamp, data); break;
         case 'intent': handleIntent(data); break;
         case 'threat': handleThreat(data); break;
         case 'mitre': handleMitre(data); break;
+        case 'vpn_security_alert': handleVPNSecurityAlert(data); break;
         case 'ai_summary': handleAiSummary(data); break;
         case 'attack_timeline': handleAttackTimeline(timestamp, data); break;
         case 'timeline': handleTimeline(timestamp, data); break;
@@ -634,6 +636,81 @@ function displayLogs(logs) {
     });
 }
 
+function handleVPNSecurityAlert(data) {
+    if (!data) return;
+    state.vpnFindings.push(data);
+    if (state.vpnFindings.length > 200) {
+        state.vpnFindings = state.vpnFindings.slice(-200);
+    }
+    renderVPNFindings(state.vpnFindings.slice(-30).reverse());
+}
+
+async function fetchVPNSecurityStatus() {
+    try {
+        const response = await fetch('/vpn-security/status');
+        if (!response.ok) return;
+        const status = await response.json();
+
+        const runningEl = document.getElementById('vpn-running');
+        if (runningEl) runningEl.textContent = status.running ? 'ONLINE' : 'OFFLINE';
+
+        const intfEl = document.getElementById('vpn-interface');
+        if (intfEl) intfEl.textContent = status.interface || '—';
+
+        const countEl = document.getElementById('vpn-findings-count');
+        if (countEl) countEl.textContent = String(status.findings_count || 0);
+
+        const detRateEl = document.getElementById('vpn-detection-rate');
+        const detectionRate = status?.vpn_detector?.detection_rate || 0;
+        if (detRateEl) detRateEl.textContent = `${Math.round(detectionRate * 100)}%`;
+    } catch (err) {
+        console.warn('[ghost] vpn status fetch error:', err);
+    }
+}
+
+async function fetchVPNSecurityFindings() {
+    try {
+        const response = await fetch('/vpn-security/recent?limit=30');
+        if (!response.ok) return;
+        const payload = await response.json();
+        const findings = payload.findings || [];
+        state.vpnFindings = findings;
+        renderVPNFindings(findings.slice().reverse());
+    } catch (err) {
+        console.warn('[ghost] vpn findings fetch error:', err);
+    }
+}
+
+function renderVPNFindings(findings) {
+    const tbody = document.getElementById('vpn-findings-tbody');
+    if (!tbody) return;
+
+    tbody.innerHTML = '';
+    if (!findings.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-msg">No VPN security findings.</td></tr>';
+        return;
+    }
+
+    findings.forEach((f) => {
+        const tr = document.createElement('tr');
+
+        const riskSignals = [];
+        if (f.vpn_detected) riskSignals.push('VPN');
+        if (f.compromised) riskSignals.push('COMPROMISED');
+        if ((f.leak_findings || []).length) riskSignals.push('LEAK');
+        if ((f.misconfiguration_issues || []).length) riskSignals.push('MISCONFIG');
+        if (f.anomaly_label === 'anomaly') riskSignals.push('ANOMALY');
+
+        tr.innerHTML =
+            `<td>${esc(formatTime(f.timestamp))}</td>` +
+            `<td>${esc(f.src_ip || '—')} → ${esc(f.dst_ip || '—')}:${esc(f.dst_port ?? '—')}</td>` +
+            `<td>${esc(f.protocol || 'Unknown')} (${Math.round((f.protocol_confidence || 0) * 100)}%)</td>` +
+            `<td>${esc(riskSignals.join(', ') || 'none')}</td>` +
+            `<td>${esc((f.zero_trust && f.zero_trust.action) || 'allow')}</td>`;
+        tbody.appendChild(tr);
+    });
+}
+
 function addSessionOption(session_id, source_ip, username) {
     const select = document.getElementById('session-select');
     if (!select) return;
@@ -873,7 +950,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Logs filtering
     document.querySelectorAll('.filter-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
-            const filter = e.target.dataset.filter;
+            const { filter } = e.target.dataset;
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
             e.target.classList.add('active');
             if (state.selectedSession) {
@@ -898,5 +975,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Load initial sessions and connect
     loadInitialSessions();
     connect();
+
+    // VPN security polling
+    fetchVPNSecurityStatus();
+    fetchVPNSecurityFindings();
+    setInterval(fetchVPNSecurityStatus, 8000);
+    setInterval(fetchVPNSecurityFindings, 10000);
 });
 

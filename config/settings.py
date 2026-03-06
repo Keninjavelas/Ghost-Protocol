@@ -5,6 +5,8 @@ No hardcoded secrets – all sensitive values come from .env or environment.
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -120,6 +122,62 @@ class Settings(BaseSettings):
     EXTERNAL_MONITOR_URL: Optional[str] = Field(
         default=None,
         description="External monitoring service URL for out-of-band alerts"
+    )
+
+    # ── Network Defense (AI-Powered Threat Detection) ─────────────────────────
+    NETWORK_DEFENSE_ENABLED: bool = Field(
+        default=False,
+        description="Enable AI-powered network threat detection"
+    )
+    NETWORK_INTERFACE: str = Field(
+        default="any",
+        description="Network interface to monitor (e.g., eth0, wlan0, any)"
+    )
+    NETWORK_DEFENSE_ML_ENABLED: bool = Field(
+        default=True,
+        description="Enable ML-based threat detection"
+    )
+    NETWORK_DEFENSE_ML_MODEL_PATH: Optional[str] = Field(
+        default=None,
+        description="Path to pre-trained ML model file"
+    )
+    NETWORK_DEFENSE_AUTOMATED_RESPONSE: bool = Field(
+        default=False,
+        description="Enable automated response actions (IP blocking, etc.)"
+    )
+    NETWORK_DEFENSE_RESPONSE_DRY_RUN: bool = Field(
+        default=True,
+        description="Run automated responses in dry-run mode (log only)"
+    )
+    NETWORK_DEFENSE_AUTO_BLOCK_THRESHOLD: float = Field(
+        default=80.0,
+        description="Threat score threshold for automatic IP blocking (0-100)"
+    )
+    NETWORK_DEFENSE_AUTO_THROTTLE_THRESHOLD: float = Field(
+        default=60.0,
+        description="Threat score threshold for IP throttling (0-100)"
+    )
+    NETWORK_DEFENSE_ALERT_WEBHOOK: Optional[str] = Field(
+        default=None,
+        description="Webhook URL for network threat alerts"
+    )
+    NETWORK_DEFENSE_LOG_DIR: str = Field(
+        default="logs/threats",
+        description="Directory for threat detection logs"
+    )
+
+    # ── VPN Security Platform (Metadata-Only Detection) ──────────────────────
+    VPN_SECURITY_ENABLED: bool = Field(
+        default=False,
+        description="Enable advanced VPN security analysis platform"
+    )
+    VPN_SECURITY_INTERFACE: str = Field(
+        default="any",
+        description="Network interface to monitor for VPN security analysis"
+    )
+    VPN_SECURITY_POLL_INTERVAL_SECONDS: float = Field(
+        default=5.0,
+        description="Polling interval for VPN security analysis loop"
     )
 
 

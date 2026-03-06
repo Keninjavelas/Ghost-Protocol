@@ -37,3 +37,13 @@ python-ulid==2.7.0
 
 # Security
 cryptography==42.0.7
+
+# Network Defense
+scapy==2.5.0
+scikit-learn==1.4.2
+numpy==1.26.4
+joblib==1.4.0
+aiohttp==3.9.5
+
+# Optional Deep Learning (sequence anomaly models)
+torch==2.3.1

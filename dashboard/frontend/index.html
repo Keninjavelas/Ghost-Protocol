@@ -42,6 +42,7 @@
   <div class="tabs-header">
     <button class="tab-btn active" data-tab="dashboard-tab">DASHBOARD</button>
     <button class="tab-btn" data-tab="logs-tab">LOGS</button>
+    <button class="tab-btn" data-tab="vpn-security-tab">VPN SECURITY</button>
   </div>
 
   <!-- ─────────────────  DASHBOARD TAB  ───────────────────── -->
@@ -323,6 +324,55 @@
     </section>
 
   </div><!-- /logs-tab -->
+
+  <!-- ─────────────────  VPN SECURITY TAB  ───────────────────── -->
+  <div id="vpn-security-tab" class="tab-content">
+    <section class="panel panel-vpn-status">
+      <div class="panel-header">
+        <span class="panel-title">VPN SECURITY STATUS</span>
+      </div>
+      <div class="snapshot-grid">
+        <div class="snap-item">
+          <span class="snap-label">PLATFORM</span>
+          <span class="snap-value" id="vpn-running">OFFLINE</span>
+        </div>
+        <div class="snap-item">
+          <span class="snap-label">INTERFACE</span>
+          <span class="snap-value" id="vpn-interface">—</span>
+        </div>
+        <div class="snap-item">
+          <span class="snap-label">FINDINGS</span>
+          <span class="snap-value" id="vpn-findings-count">0</span>
+        </div>
+        <div class="snap-item">
+          <span class="snap-label">VPN DETECTIONS</span>
+          <span class="snap-value" id="vpn-detection-rate">0%</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel panel-vpn-findings">
+      <div class="panel-header">
+        <span class="panel-title">RECENT VPN SECURITY FINDINGS</span>
+      </div>
+      <div class="logs-table-container">
+        <table class="logs-table" id="vpn-findings-table">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Flow</th>
+              <th>Protocol</th>
+              <th>Risk Signals</th>
+              <th>Zero Trust</th>
+            </tr>
+          </thead>
+          <tbody id="vpn-findings-tbody">
+            <tr><td colspan="5" class="empty-msg">Awaiting VPN security findings…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div><!-- /vpn-security-tab -->
 
 </main><!-- /dashboard-frame -->
 

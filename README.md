@@ -18,7 +18,7 @@ Instead of blocking or ignoring intrusion attempts, Ghost Protocol **invites att
 
 ## ✨ Key Features
 
-Ghost Protocol delivers enterprise-grade cyber deception intelligence through eight core capabilities:
+Ghost Protocol delivers enterprise-grade cyber deception intelligence through these core capabilities:
 
 | Feature | Description |
 |---------|-------------|
@@ -30,6 +30,163 @@ Ghost Protocol delivers enterprise-grade cyber deception intelligence through ei
 | 🔦 **Canary Token Tracking** | Planted credentials, URLs, and files that beacon home when accessed |
 | 📡 **Live SOC Dashboard** | WebSocket-powered real-time interface with session timelines and MITRE heatmaps |
 | 📋 **Automated Attribution Reports** | Full intelligence reports generated per session with threat narrative |
+| 🛡️ **AI-Powered Network Defense** | Real-time packet capture, ML-based threat detection, automated response (NEW) |
+| 🔒 **Network Seizure Resilience** | Encrypted offline caching, dead man's switch, anomaly detection, out-of-band alerts |
+
+---
+
+## 🔥 Network Defense Platform (NEW)
+
+**Ghost Protocol now includes an autonomous AI-powered network threat detection system** that operates alongside the SSH honeypot, providing comprehensive network-level security monitoring.
+
+### Network Defense Capabilities
+
+| Component | Description |
+|-----------|-------------|
+| **Packet Capture Engine** | Real-time Scapy-based packet sniffer supporting TCP/UDP/ICMP/DNS/HTTP/ARP protocols |
+| **Traffic Parser** | Multi-protocol normalization with 5-tuple extraction and traffic classification |
+| **Feature Extractor** | ML-ready feature engineering with 20+ metrics (entropy, packet rates, connection patterns) |
+| **AI Threat Classifier** | Random Forest + Isolation Forest for anomaly detection and attack classification |
+| **Rule-Based Detector** | 27+ attack detection rules across 8 categories (reconnaissance, brute force, floods, etc.) |
+| **Alert Engine** | Multi-channel alerting (dashboard, webhook, syslog, email, SMS) |
+| **Automated Response** | IP blocking, rate limiting, traffic throttling, session quarantine (dry-run mode default) |
+| **Threat Logger** | Structured JSONL logging with query interface for forensic analysis |
+
+### Detected Attack Types (27+)
+
+- **Reconnaissance**: Port scanning, network scanning, service enumeration
+- **Credential Attacks**: Brute force (SSH/RDP/Telnet), password spraying
+- **Network Manipulation**: ARP spoofing, DNS spoofing
+- **Flood Attacks**: SYN flood, UDP flood, ICMP flood
+- **Malware Communication**: C2 beaconing patterns, botnet traffic
+- **Data Exfiltration**: Large outbound transfers (>1GB threshold)
+- **Insider Threats**: Abnormal file access patterns
+- **Infrastructure Attacks**: Router admin probing, unauthorized access attempts
+
+### Network Defense Architecture
+
+```
+Network Traffic → Packet Capture (Scapy) → Traffic Parser
+                         ↓
+            Feature Extractor (10s windows)
+                         ↓
+        ┌────────────────┴────────────────┐
+        ↓                                 ↓
+   AI Classifier                  Rule-Based Detector
+   (ML Models)                    (27+ Attack Rules)
+        ↓                                 ↓
+        └────────────────┬────────────────┘
+                         ↓
+              Detection Engine (Combined)
+                         ↓
+        ┌────────────────┼────────────────┐
+        ↓                ↓                 ↓
+  Alert Engine   Threat Logger   Response Engine
+  (Multi-channel) (JSONL logs)   (IP blocking, etc.)
+        ↓                ↓                 ↓
+    Dashboard         Analysis      Automated Action
+```
+
+### Quick Start - Network Defense
+
+```bash
+# Enable network defense in .env
+NETWORK_DEFENSE_ENABLED=true
+NETWORK_INTERFACE=eth0  # or "any" for all interfaces
+NETWORK_DEFENSE_ML_ENABLED=true
+NETWORK_DEFENSE_AUTOMATED_RESPONSE=false  # Set to true to enable blocking
+NETWORK_DEFENSE_RESPONSE_DRY_RUN=true     # Keep true for testing
+
+# Install additional dependencies
+pip install scapy scikit-learn numpy
+
+# Start Ghost Protocol (network defense starts automatically if enabled)
+docker-compose up -d
+python -m uvicorn dashboard.backend.main:app --reload
+
+# View network threats via API
+curl http://localhost:8000/network-defense/status
+curl http://localhost:8000/network-defense/recent
+curl http://localhost:8000/network-defense/threats?threat_level=MALICIOUS
+
+# Query threat logs
+curl http://localhost:8000/network-defense/threats?min_score=60&limit=50
+```
+
+### Configuration Options
+
+All network defense settings are configurable via environment variables or `.env`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NETWORK_DEFENSE_ENABLED` | `false` | Enable/disable network defense system |
+| `NETWORK_INTERFACE` | `any` | Network interface to monitor |
+| `NETWORK_DEFENSE_ML_ENABLED` | `true` | Enable ML-based detection |
+| `NETWORK_DEFENSE_ML_MODEL_PATH` | `None` | Path to pre-trained model (optional) |
+| `NETWORK_DEFENSE_AUTOMATED_RESPONSE` | `false` | Enable automated responses |
+| `NETWORK_DEFENSE_RESPONSE_DRY_RUN` | `true` | Log actions without executing |
+| `NETWORK_DEFENSE_AUTO_BLOCK_THRESHOLD` | `80.0` | Threat score for auto-blocking (0-100) |
+| `NETWORK_DEFENSE_AUTO_THROTTLE_THRESHOLD` | `60.0` | Threat score for throttling (0-100) |
+| `NETWORK_DEFENSE_ALERT_WEBHOOK` | `None` | External webhook URL for alerts |
+| `NETWORK_DEFENSE_LOG_DIR` | `logs/threats` | Directory for threat logs |
+
+---
+
+## VPN Security Platform (NEW)
+
+Ghost Protocol now includes a metadata-only VPN security pipeline for detecting encrypted threat activity, leak conditions, and zero-trust access risks without payload decryption.
+
+### VPN Security Capabilities
+
+| Component | Description |
+|-----------|-------------|
+| **VPN Detection** | Multi-signal VPN flow detection using port, statistical, timing, and ML-backed traffic labels |
+| **Protocol Identification** | Identifies likely protocol family (OpenVPN, WireGuard, IPSec, SSTP, L2TP, custom tunnels) |
+| **Misconfiguration Analysis** | Flags weak TLS/cipher/protocol settings and tunnel hygiene issues |
+| **Compromise Detection** | Detects potential account/gateway compromise and exfiltration signals |
+| **Behavior Analytics (UBA)** | Builds session/user baselines and scores anomalous behavior |
+| **Leak Detection** | Heuristic DNS leak, tunnel bypass, and IPv6 leak detection |
+| **Zero-Trust Decisioning** | Produces trust score + allow/limit/deny action with role-based segmentation |
+| **Anomaly Scoring** | Isolation Forest + fallback drift scoring for metadata anomalies |
+
+### Quick Start - VPN Security
+
+```bash
+# Enable VPN security in .env
+VPN_SECURITY_ENABLED=true
+VPN_SECURITY_INTERFACE=any
+VPN_SECURITY_POLL_INTERVAL_SECONDS=5.0
+
+# Start backend
+python -m uvicorn dashboard.backend.main:app --reload
+
+# Service control
+curl -X POST http://localhost:8000/vpn-security/start
+curl -X POST http://localhost:8000/vpn-security/stop
+
+# Status and findings
+curl http://localhost:8000/vpn-security/status
+curl http://localhost:8000/vpn-security/recent
+curl "http://localhost:8000/vpn-security/findings?vpn_only=true&limit=50"
+```
+
+### VPN Security API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/vpn-security/start` | `POST` | Start VPN security coordinator loop |
+| `/vpn-security/stop` | `POST` | Stop VPN security coordinator loop |
+| `/vpn-security/status` | `GET` | Get service and detector statistics |
+| `/vpn-security/findings` | `GET` | Query findings with optional filters |
+| `/vpn-security/recent` | `GET` | Fetch most recent findings |
+
+Query parameters for `/vpn-security/findings`:
+
+- `vpn_only` (bool)
+- `compromised_only` (bool)
+- `leak_only` (bool)
+- `min_anomaly_score` (float)
+- `limit` (int, default `100`)
 
 ---
 

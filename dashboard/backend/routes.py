@@ -434,6 +434,139 @@ def create_dashboard_router(
             "logs": logs,
         }
 
+    # ── Frontend Bridge Endpoints ─────────────────────────────────────────────
+    @router.get("/snapshot/{session_id}")
+    async def get_snapshot(
+        session_id: str,
+        db: AsyncSession = Depends(get_db_session),
+    ) -> dict[str, Any]:
+        """Snapshot data for frontend dashboard (session summary)."""
+        try:
+            uid = uuid.UUID(session_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid session ID")
+
+        result = await db.execute(
+            select(DBSession)
+            .where(DBSession.id == uid)
+            .options(selectinload(DBSession.mitre_mappings))
+        )
+        s = result.scalar_one_or_none()
+        if s is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Get live data if active
+        live_sessions = {str(x.session_id): x for x in await session_manager.all_sessions()}
+        live = live_sessions.get(session_id)
+
+        # Calculate duration
+        start = s.start_time or datetime.now(timezone.utc)
+        end = s.end_time or datetime.now(timezone.utc)
+        duration_seconds = (end - start).total_seconds()
+        minutes = int(duration_seconds // 60)
+        seconds = int(duration_seconds % 60)
+
+        # MITRE techniques from mappings
+        mitre_techniques = [
+            {
+                "technique_id": m.technique_id,
+                "technique_name": m.technique_name,
+                "tactic": m.tactic,
+                "confidence": m.confidence or 0.0,
+            }
+            for m in s.mitre_mappings
+        ]
+
+        return {
+            "session_id": session_id,
+            "primary_objective": s.primary_objective or "unknown",
+            "attacker_type": s.attacker_type or "unknown",
+            "threat_level": live.threat_level if live else s.threat_level or "LOW",
+            "commands_executed": len(s.commands) if s.commands else (live.command_count if live else 0),
+            "session_duration": f"{minutes}m {seconds}s",
+            "mitre_techniques": mitre_techniques,
+            "confidence": live.confidence if live else 0.0,
+        }
+
+    @router.get("/attack-summary/{session_id}")
+    async def get_attack_summary(
+        session_id: str,
+        db: AsyncSession = Depends(get_db_session),
+    ) -> dict[str, str]:
+        """Attack narrative and summary for frontend."""
+        try:
+            uid = uuid.UUID(session_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid session ID")
+
+        result = await db.execute(
+            select(DBSession)
+            .where(DBSession.id == uid)
+            .options(selectinload(DBSession.mitre_mappings))
+        )
+        s = result.scalar_one_or_none()
+        if s is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        summary = _generate_attack_narrative(s)
+        return {"summary": summary}
+
+    @router.get("/logs/{session_id}")
+    async def get_session_logs_v2(
+        session_id: str,
+        event_type: str = "all",
+        limit: int = 500,
+        db: AsyncSession = Depends(get_db_session),
+    ) -> dict[str, Any]:
+        """Get session logs (events) in frontend-compatible format."""
+        try:
+            uid = uuid.UUID(session_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid session ID")
+
+        result = await db.execute(
+            select(DBSession)
+            .where(DBSession.id == uid)
+            .options(selectinload(DBSession.commands))
+        )
+        s = result.scalar_one_or_none()
+        if s is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Get live events if session is active
+        live_sessions = {str(x.session_id): x for x in await session_manager.all_sessions()}
+        live = live_sessions.get(session_id)
+
+        logs = []
+
+        # Add commands as logs
+        if event_type in ["all", "commands"]:
+            for cmd in sorted(s.commands, key=lambda c: c.timestamp) if s.commands else []:
+                logs.append({
+                    "timestamp": cmd.timestamp.isoformat() if cmd.timestamp else None,
+                    "event_type": "command",
+                    "details": cmd.command_text or "unknown",
+                })
+
+        # Add live session info if available
+        if live and event_type in ["all", "system"]:
+            logs.append({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "event_type": "system",
+                "details": f"Session active from {s.source_ip} as {s.username}",
+            })
+
+        # Limit and sort
+        logs = sorted(logs, key=lambda x: x["timestamp"], reverse=True)[:limit]
+
+        return {
+            "session_id": session_id,
+            "total_logs": len(logs),
+            "filters_available": ["all", "commands", "system"],
+            "current_filter": event_type,
+            "logs": logs,
+        }
+
     # ── Demo burst ────────────────────────────────────────────────────────────
     @router.get("/ws-test", tags=["meta"])
     async def ws_demo_burst() -> dict[str, str]:
