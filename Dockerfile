@@ -8,7 +8,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --no-deps -r requirements.txt || true
+RUN pip install --no-cache-dir -r requirements.txt || \
+    pip install --no-cache-dir reportlab asyncssh structlog pyyaml pydantic pydantic-settings sqlalchemy asyncpg psycopg2-binary redis aioredis uvicorn fastapi starlette docker paramiko httpx aiohttp cryptography bcrypt pynacl scikit-learn numpy scipy torch tiktoken openai
 
 COPY . .
 
@@ -19,4 +21,4 @@ RUN mkdir -p config && \
 
 EXPOSE 2222 8000
 
-CMD ["python", "-m", "gateway.ssh_server"]
+CMD ["python", "-m", "dashboard.backend.main"]

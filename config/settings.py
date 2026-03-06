@@ -31,8 +31,8 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = Field(default="ghost")
     POSTGRES_PASSWORD: str = Field(default="ghostpass")
     POSTGRES_DB: str = Field(default="ghost_db")
-    POSTGRES_HOST: str = Field(default="localhost")
-    POSTGRES_PORT: int = Field(default=5433, description="PostgreSQL port (5433 for Docker, 5432 for local)")
+    POSTGRES_HOST: str = Field(default="ghost_postgres")
+    POSTGRES_PORT: int = Field(default=5432, description="PostgreSQL port")
 
     @property
     def DATABASE_URL(self) -> str:  # noqa: N802

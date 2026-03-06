@@ -38,6 +38,9 @@ python-ulid==2.7.0
 # Security
 cryptography==42.0.7
 
+# PDF Report Generation
+reportlab>=4.0.0
+
 # Network Defense
 scapy==2.5.0
 scikit-learn==1.4.2

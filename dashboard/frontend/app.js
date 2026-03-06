@@ -123,6 +123,8 @@ function routeEvent(ev) {
         case 'timeline': handleTimeline(timestamp, data); break;
         case 'beacon': handleBeacon(timestamp, data); break;
         case 'command_received': handleCommand(timestamp, data); break;
+        case 'report_generated': handleReportGenerated(session_id, data); break;
+        case 'session_closed': handleSessionClosed(session_id, data); break;
         default: console.warn('[ghost] unknown event type:', type);
     }
 }
@@ -1053,6 +1055,48 @@ function displayIntelligenceReport(report, sessionId) {
 function downloadReport(sessionId) {
     // Trigger PDF download of the intelligence report
     window.open(`/report/${sessionId}/pdf`, '_blank');
+}
+
+/* report_generated ─────────────────────────────── */
+function handleReportGenerated(sessionId, data) {
+    const report = data.report;
+    if (report) {
+        displayIntelligenceReport(report, sessionId);
+    }
+}
+
+/* session_closed ──────────────────────────────── */
+function handleSessionClosed(sessionId, data) {
+    if (state.sessions[sessionId]) {
+        state.sessions[sessionId].status = 'closed';
+    }
+    updateSessionPill();
+
+    // Add terminal notification
+    const out = document.getElementById('terminal-output');
+    const div = document.createElement('div');
+    div.className = 't-entry';
+    div.innerHTML = `<div style="color: #ff2d55; font-weight: bold;">
+        [SESSION ENDED] Attacker disconnected — Duration: ${data.duration || 0}s | 
+        Commands: ${data.command_count || 0} | Threat: ${esc(data.threat_level || 'UNKNOWN')} | 
+        Risk: ${(data.risk_score || 0).toFixed(0)}/100
+    </div>
+    <div style="color: #00f0ff; margin-top: 4px;">
+        📄 Intelligence report generated — <a href="/report/${sessionId}/pdf" target="_blank" 
+        style="color: #00f0ff; text-decoration: underline; cursor: pointer;">Download PDF Report</a>
+    </div>`;
+    out.appendChild(div);
+    out.scrollTop = out.scrollHeight;
+
+    // Auto-fetch and display the report
+    fetch(`/report/${sessionId}`)
+        .then(r => r.json())
+        .then(result => {
+            if (result.report) {
+                displayIntelligenceReport(result.report, sessionId);
+            }
+        })
+        .catch(err => console.warn('[ghost] failed to fetch report:', err));
 }
 
 /* ═══════════════════════════════════════════════

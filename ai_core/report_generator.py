@@ -139,9 +139,99 @@ class ReportGenerator:
             log.info("report_generated", session_id=str(session_state.session_id))
             return report
         except Exception as exc:
-            log.warning("report_generation_error", error=str(exc))
-            return {
-                "session_id": str(session_state.session_id),
-                "executive_summary": "Report generation failed.",
-                "error": str(exc),
-            }
+            log.warning("report_generation_llm_failed", error=str(exc))
+            # Generate a comprehensive fallback report without LLM
+            return self._generate_fallback_report(session_state, now, history)
+
+    def _generate_fallback_report(
+        self,
+        session_state: "SessionState",
+        now,
+        history: list,
+    ) -> dict[str, Any]:
+        """Generate a complete intelligence report without LLM as fallback."""
+        from datetime import timezone
+
+        duration_secs = int((now - session_state.start_time).total_seconds())
+        cmd_count = len(session_state.command_history)
+        risk_score = session_state.risk_score
+        threat_level = session_state.threat_level
+        attacker_type = session_state.attacker_type or "unknown"
+        objective = session_state.primary_objective or "reconnaissance"
+        sophistication = session_state.sophistication_level or "low"
+        source_ip = session_state.source_ip
+        username = session_state.username
+
+        # Extract commands list
+        commands_list = [e["command"] for e in history]
+
+        # Detect accessed sensitive files
+        sensitive_files = []
+        tools_used = set()
+        for cmd in commands_list:
+            cmd_lower = cmd.lower()
+            tools_used.add(cmd.split()[0] if cmd.split() else "")
+            if any(k in cmd_lower for k in ["password", "credential", "shadow", ".aws", ".env", "db", "sql", "key"]):
+                sensitive_files.append(cmd)
+
+        # Build executive summary
+        if risk_score > 70:
+            severity = "HIGH"
+            summary = (
+                f"An attacker from IP {source_ip} (username: {username}) conducted a {severity}-severity "
+                f"intrusion lasting {duration_secs}s. The attacker executed {cmd_count} commands focused on "
+                f"{objective.replace('-', ' ')}. Risk score: {risk_score:.0f}/100. Immediate containment recommended."
+            )
+        elif risk_score > 40:
+            severity = "MEDIUM"
+            summary = (
+                f"A {severity}-severity attack was detected from {source_ip} (username: {username}). "
+                f"The attacker executed {cmd_count} commands over {duration_secs}s, primarily engaged in "
+                f"{objective.replace('-', ' ')}. Risk score: {risk_score:.0f}/100."
+            )
+        else:
+            severity = "LOW"
+            summary = (
+                f"A {severity}-severity session was recorded from {source_ip} (username: {username}). "
+                f"{cmd_count} commands were executed over {duration_secs}s. "
+                f"Activity classified as {objective.replace('-', ' ')}. Risk score: {risk_score:.0f}/100."
+            )
+
+        report = {
+            "session_id": str(session_state.session_id),
+            "generated_at": now.isoformat(),
+            "executive_summary": summary,
+            "attacker_profile": {
+                "type": attacker_type,
+                "objective": objective,
+                "sophistication": sophistication,
+                "likely_nation_state": sophistication == "high" and risk_score > 70,
+            },
+            "techniques_used": [],
+            "intent_analysis": {
+                "primary_goal": objective,
+                "secondary_goals": ["system enumeration", "data access"],
+                "behavioral_patterns": f"Attacker used {len(tools_used)} unique tools across {cmd_count} commands",
+            },
+            "threat_assessment": {
+                "risk_score": risk_score,
+                "threat_level": threat_level,
+                "immediate_danger": risk_score > 70,
+                "data_at_risk": sensitive_files[:5] if sensitive_files else ["No sensitive data accessed"],
+            },
+            "mitigation_suggestions": [
+                f"Block IP address {source_ip} at firewall level",
+                "Rotate all credentials that may have been exposed",
+                "Review system logs for additional unauthorized access",
+                "Implement multi-factor authentication for SSH access",
+                "Deploy intrusion detection system (IDS) monitoring",
+            ],
+            "iocs": {
+                "ip_addresses": [source_ip],
+                "usernames": [username],
+                "tools_or_commands": list(tools_used)[:10],
+            },
+        }
+
+        log.info("fallback_report_generated", session_id=str(session_state.session_id))
+        return report

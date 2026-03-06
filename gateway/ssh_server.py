@@ -128,6 +128,11 @@ class GhostSSHSession(asyncssh.SSHServerSession):   # type: ignore[misc]
                 if self._buf:
                     self._buf = self._buf[:-1]
                     self._send("\b \b")
+            elif char == "\x04":  # Ctrl-D (EOF)
+                if not self._buf:
+                    self._send("logout\r\n")
+                    self._loop.create_task(self._close_and_exit())
+                    return
             elif char == "\x03":  # Ctrl-C
                 self._buf = ""
                 self._send("^C\r\n")
@@ -136,13 +141,28 @@ class GhostSSHSession(asyncssh.SSHServerSession):   # type: ignore[misc]
                 self._buf += char
                 self._send(char)  # Echo
 
+    _EXIT_COMMANDS = {"exit", "quit", "logout", "bye", "disconnect"}
+
     async def _handle_command(self, command: str) -> None:
         if self._session_state is None:
             self._prompt()
             return
 
         sid = self._session_state.session_id
-        
+
+        # ── Handle exit / quit / logout ────────────────────────────────────────
+        if command.strip().lower() in self._EXIT_COMMANDS:
+            log.info("attacker_exit_requested", session_id=str(sid), command=command)
+            try:
+                await self._session_manager.append_command(sid, command)
+            except Exception:
+                pass
+            self._send("logout\r\n")
+            await self._end_session()
+            if self._chan:
+                self._chan.close()
+            return
+
         try:
             await self._session_manager.append_command(sid, command)
         except Exception as exc:
@@ -187,6 +207,12 @@ class GhostSSHSession(asyncssh.SSHServerSession):   # type: ignore[misc]
 
         self._send(response.rstrip("\n") + "\r\n")
         self._prompt()
+
+    async def _close_and_exit(self) -> None:
+        """Handle Ctrl-D: end session and close channel."""
+        await self._end_session()
+        if self._chan:
+            self._chan.close()
 
     def eof_received(self) -> None:
         self._loop.create_task(self._end_session())
