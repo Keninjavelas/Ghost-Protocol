@@ -872,11 +872,16 @@ async function loadInitialSessions() {
    DEMO MODE
 ═══════════════════════════════════════════════ */
 
-async function runDemo() {
-    const btn = document.getElementById('demo-btn');
+async function runDemo(buttonId = 'demo-btn') {
+    const btn = document.getElementById(buttonId);
+    const companionBtn = buttonId === 'demo-btn' ? document.getElementById('demo-btn-top') : document.getElementById('demo-btn');
+    if (!btn) return;
     const originalText = btn.textContent;
     btn.textContent = '⏳ Running Demo...';
     btn.disabled = true;
+    if (companionBtn) {
+        companionBtn.disabled = true;
+    }
     
     try {
         // Call the new full demo script endpoint
@@ -909,9 +914,10 @@ async function runDemo() {
                 displayIntelligenceReport(result.report, result.session_id);
             }
             
-            // Refresh the session list
+            // Refresh sessions and auto-focus the demo session in the UI.
             setTimeout(() => {
-                fetchAndPopulateSessions();
+                loadInitialSessions();
+                selectSession(result.session_id);
             }, 1000);
             
         } else {
@@ -936,6 +942,9 @@ async function runDemo() {
         setTimeout(() => {
             btn.textContent = originalText;
             btn.disabled = false;
+            if (companionBtn) {
+                companionBtn.disabled = false;
+            }
         }, 5000);
     }
 }
