@@ -113,7 +113,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     configure_logging()
     log.info("ghost_dashboard_starting")
 
-    await init_db()
+    try:
+        await init_db()
+        log.info("database_initialized")
+    except Exception as e:
+        log.warning("database_init_failed", error=str(e))
+        log.warning("continuing_without_database", note="Dashboard will operate with limited functionality")
 
     _docker_mgr = DockerManager()
     _telemetry = TelemetryLogger()
@@ -169,8 +174,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await db.execute(text("SELECT 1"))
         log.info("database_health_check_passed")
     except Exception as e:
-        log.critical("database_health_check_failed", error=str(e))
-        raise RuntimeError(f"Database connection failed: {e}")
+        log.warning("database_health_check_failed", error=str(e))
+        log.warning("continuing_without_database", note="Some features may be limited")
     
     # LLM health check
     try:
@@ -198,9 +203,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             encoding="utf-8",
         )
         log.info("ssh_honeypot_ready", host=settings.SSH_HOST, port=settings.SSH_PORT)
+    except OSError as e:
+        log.warning("ssh_server_startup_failed", port=settings.SSH_PORT, error=str(e))
+        log.warning("continuing_without_ssh_honeypot", note="Backend will operate without SSH honeypot")
     except Exception as e:
-        log.critical("ssh_server_startup_failed", error=str(e))
-        raise RuntimeError(f"SSH server failed to start: {e}")
+        log.warning("ssh_server_startup_failed", error=str(e))
+        log.warning("continuing_without_ssh_honeypot", note="Backend will operate without SSH honeypot")
 
     # Start resilience monitoring
     try:
