@@ -117,10 +117,12 @@ function routeEvent(ev) {
         case 'threat': handleThreat(data); break;
         case 'mitre': handleMitre(data); break;
         case 'vpn_security_alert': handleVPNSecurityAlert(data); break;
+        case 'network_threat_alert': handleVPNSecurityAlert(data); break;
         case 'ai_summary': handleAiSummary(data); break;
         case 'attack_timeline': handleAttackTimeline(timestamp, data); break;
         case 'timeline': handleTimeline(timestamp, data); break;
         case 'beacon': handleBeacon(timestamp, data); break;
+        case 'command_received': handleCommand(timestamp, data); break;
         default: console.warn('[ghost] unknown event type:', type);
     }
 }
@@ -1049,8 +1051,8 @@ function displayIntelligenceReport(report, sessionId) {
 }
 
 function downloadReport(sessionId) {
-    // Trigger download of the report
-    window.open(`/report/${sessionId}`, '_blank');
+    // Trigger PDF download of the intelligence report
+    window.open(`/report/${sessionId}/pdf`, '_blank');
 }
 
 /* ═══════════════════════════════════════════════

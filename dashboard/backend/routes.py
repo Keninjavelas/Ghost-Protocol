@@ -73,13 +73,14 @@ def _generate_attack_narrative(session: DBSession) -> str:
                     f"across {tactics_str}.")
     
     # Threat assessment
-    if session.risk_score and session.risk_score > 70:
-        parts.append(f"Risk score ({session.risk_score:.0f}/100) indicates HIGH severity. "
+    score = session.risk_score or 0
+    if score > 70:
+        parts.append(f"Risk score ({score:.0f}/100) indicates HIGH severity. "
                     "Immediate containment recommended.")
-    elif session.risk_score and session.risk_score > 40:
-        parts.append(f"Risk score ({session.risk_score:.0f}/100) indicates MEDIUM severity.")
+    elif score > 40:
+        parts.append(f"Risk score ({score:.0f}/100) indicates MEDIUM severity.")
     else:
-        parts.append(f"Risk score ({session.risk_score:.0f}/100) indicates LOW severity.")
+        parts.append(f"Risk score ({score:.0f}/100) indicates LOW severity.")
     
     return " ".join(parts)
 
@@ -337,6 +338,243 @@ def create_dashboard_router(
             "generated_at": report.generated_at.isoformat(),
             "report": report.report_json,
         }
+
+    # ── PDF Intelligence Report Download ───────────────────────────────────────
+    @router.get("/report/{session_id}/pdf")
+    async def get_report_pdf(
+        session_id: str,
+        db: AsyncSession = Depends(get_db_session),
+    ):
+        """Generate and return a downloadable PDF intelligence report."""
+        from io import BytesIO
+        from fastapi.responses import StreamingResponse
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.lib.colors import HexColor
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.platypus import (
+            SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+            HRFlowable,
+        )
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT
+
+        try:
+            uid = uuid.UUID(session_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid session ID")
+
+        # Fetch session + report
+        s = await db.execute(
+            select(DBSession)
+            .where(DBSession.id == uid)
+            .options(
+                selectinload(DBSession.commands),
+                selectinload(DBSession.mitre_mappings),
+                selectinload(DBSession.report),
+            )
+        )
+        session = s.scalar_one_or_none()
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        report_json = session.report.report_json if session.report else {}
+
+        # ── Build PDF ──
+        buf = BytesIO()
+        doc = SimpleDocTemplate(
+            buf, pagesize=A4,
+            leftMargin=20*mm, rightMargin=20*mm,
+            topMargin=20*mm, bottomMargin=20*mm,
+        )
+
+        styles = getSampleStyleSheet()
+        dark_bg = HexColor("#0a0e17")
+        accent = HexColor("#00f0ff")
+        red = HexColor("#ff2d55")
+        white = HexColor("#ffffff")
+        grey = HexColor("#8892b0")
+
+        title_style = ParagraphStyle(
+            "GhostTitle", parent=styles["Title"],
+            fontSize=22, textColor=accent, spaceAfter=4,
+        )
+        subtitle_style = ParagraphStyle(
+            "GhostSub", parent=styles["Normal"],
+            fontSize=10, textColor=grey, alignment=TA_CENTER, spaceAfter=12,
+        )
+        heading_style = ParagraphStyle(
+            "GhostH2", parent=styles["Heading2"],
+            fontSize=14, textColor=HexColor("#1a1a2e"), spaceBefore=14, spaceAfter=6,
+            borderWidth=0, borderPadding=0,
+        )
+        body_style = ParagraphStyle(
+            "GhostBody", parent=styles["Normal"],
+            fontSize=10, leading=14, textColor=HexColor("#1a1a2e"),
+        )
+        small_style = ParagraphStyle(
+            "GhostSmall", parent=styles["Normal"],
+            fontSize=8, textColor=grey,
+        )
+
+        elements = []
+
+        # Header
+        elements.append(Paragraph("GHOST PROTOCOL", title_style))
+        elements.append(Paragraph("AI-Powered Cyber Threat Intelligence Report", subtitle_style))
+        gen_time = session.report.generated_at.strftime("%Y-%m-%d %H:%M UTC") if session.report else datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        elements.append(Paragraph(f"Generated: {gen_time}  |  Session: {session_id[:8]}...", small_style))
+        elements.append(HRFlowable(width="100%", thickness=1, color=accent, spaceAfter=10))
+
+        # Session overview table
+        start = session.start_time
+        end = session.end_time or datetime.now(timezone.utc)
+        dur = int((end - start).total_seconds()) if start else 0
+        dur_str = f"{dur // 60}m {dur % 60}s"
+        score = session.risk_score or 0
+        threat = session.threat_level or "UNKNOWN"
+
+        overview_data = [
+            ["Source IP", session.source_ip or "N/A", "Username", session.username or "N/A"],
+            ["Attacker Type", session.attacker_type or "Unknown", "Objective", session.primary_objective or "Unknown"],
+            ["Risk Score", f"{score}/100", "Threat Level", threat],
+            ["Duration", dur_str, "Commands", str(len(session.commands))],
+        ]
+        overview_table = Table(overview_data, colWidths=[75, 120, 75, 120])
+        overview_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, -1), HexColor("#e8ecf1")),
+            ("BACKGROUND", (2, 0), (2, -1), HexColor("#e8ecf1")),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#ccd6e0")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(overview_table)
+        elements.append(Spacer(1, 10))
+
+        # Executive Summary
+        exec_summary = report_json.get("executive_summary", _generate_attack_narrative(session))
+        elements.append(Paragraph("EXECUTIVE SUMMARY", heading_style))
+        elements.append(Paragraph(exec_summary, body_style))
+        elements.append(Spacer(1, 6))
+
+        # MITRE ATT&CK Techniques
+        techniques = []
+        if report_json.get("techniques_used"):
+            techniques = report_json["techniques_used"]
+        elif session.mitre_mappings:
+            seen = set()
+            for mm in session.mitre_mappings:
+                if mm.technique_id not in seen:
+                    techniques.append({"mitre_id": mm.technique_id, "name": mm.technique_name, "description": mm.tactic or ""})
+                    seen.add(mm.technique_id)
+
+        if techniques:
+            elements.append(Paragraph("MITRE ATT&amp;CK TECHNIQUES", heading_style))
+            tech_data = [["ID", "Name", "Details"]]
+            for t in techniques[:15]:
+                tech_data.append([
+                    t.get("mitre_id") or t.get("id", ""),
+                    t.get("name", ""),
+                    t.get("description", ""),
+                ])
+            tech_table = Table(tech_data, colWidths=[60, 140, 190])
+            tech_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), HexColor("#1a1a2e")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), white),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#ccd6e0")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]))
+            elements.append(tech_table)
+            elements.append(Spacer(1, 6))
+
+        # Intent / Attacker Profile
+        intent = report_json.get("intent_analysis") or report_json.get("attacker_profile")
+        if intent:
+            elements.append(Paragraph("ATTACKER PROFILE &amp; INTENT", heading_style))
+            for k, v in intent.items():
+                label = k.replace("_", " ").title()
+                if isinstance(v, list):
+                    v = ", ".join(str(x) for x in v)
+                elements.append(Paragraph(f"<b>{label}:</b> {v}", body_style))
+            elements.append(Spacer(1, 6))
+
+        # Threat Assessment
+        threat_data = report_json.get("threat_assessment")
+        if threat_data:
+            elements.append(Paragraph("THREAT ASSESSMENT", heading_style))
+            for k, v in threat_data.items():
+                label = k.replace("_", " ").title()
+                if isinstance(v, list):
+                    v = ", ".join(str(x) for x in v)
+                elements.append(Paragraph(f"<b>{label}:</b> {v}", body_style))
+            elements.append(Spacer(1, 6))
+
+        # Mitigation Recommendations
+        mitigations = report_json.get("mitigation_suggestions", [])
+        if mitigations:
+            elements.append(Paragraph("MITIGATION RECOMMENDATIONS", heading_style))
+            for i, m in enumerate(mitigations, 1):
+                elements.append(Paragraph(f"{i}. {m}", body_style))
+            elements.append(Spacer(1, 6))
+
+        # IOCs
+        iocs = report_json.get("iocs")
+        if iocs:
+            elements.append(Paragraph("INDICATORS OF COMPROMISE (IOCs)", heading_style))
+            for k, v in iocs.items():
+                label = k.replace("_", " ").title()
+                if isinstance(v, list):
+                    v = ", ".join(str(x) for x in v)
+                elements.append(Paragraph(f"<b>{label}:</b> {v}", body_style))
+            elements.append(Spacer(1, 6))
+
+        # Command Log
+        if session.commands:
+            elements.append(Paragraph("COMMAND LOG", heading_style))
+            cmd_data = [["#", "Command", "Timestamp"]]
+            for i, cmd in enumerate(session.commands[:30], 1):
+                ts = cmd.timestamp.strftime("%H:%M:%S") if cmd.timestamp else ""
+                cmd_text = (cmd.command or "")[:80]
+                cmd_data.append([str(i), cmd_text, ts])
+            cmd_table = Table(cmd_data, colWidths=[25, 280, 65])
+            cmd_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), HexColor("#1a1a2e")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), white),
+                ("FONTSIZE", (0, 0), (-1, -1), 7),
+                ("FONTNAME", (1, 1), (1, -1), "Courier"),
+                ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#ccd6e0")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ]))
+            elements.append(cmd_table)
+
+        # Footer
+        elements.append(Spacer(1, 20))
+        elements.append(HRFlowable(width="100%", thickness=0.5, color=grey, spaceAfter=6))
+        elements.append(Paragraph(
+            "CLASSIFIED // GHOST PROTOCOL // AI-GENERATED THREAT INTELLIGENCE",
+            ParagraphStyle("Footer", parent=styles["Normal"], fontSize=7, textColor=grey, alignment=TA_CENTER),
+        ))
+
+        doc.build(elements)
+        buf.seek(0)
+
+        filename = f"ghost_protocol_report_{session_id[:8]}.pdf"
+        return StreamingResponse(
+            buf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     # ── Session Snapshot (Quick Summary for Judges) ────────────────────────────
     @router.get("/snapshot/{session_id}")
     async def get_session_snapshot(
@@ -499,139 +737,6 @@ def create_dashboard_router(
             "session_id": str(session.id),
             "total_logs": len(logs),
             "filters_available": ["all", "commands", "ai_analysis", "mitre", "system"],
-            "current_filter": event_type,
-            "logs": logs,
-        }
-
-    # ── Frontend Bridge Endpoints ─────────────────────────────────────────────
-    @router.get("/snapshot/{session_id}")
-    async def get_snapshot(
-        session_id: str,
-        db: AsyncSession = Depends(get_db_session),
-    ) -> dict[str, Any]:
-        """Snapshot data for frontend dashboard (session summary)."""
-        try:
-            uid = uuid.UUID(session_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid session ID")
-
-        result = await db.execute(
-            select(DBSession)
-            .where(DBSession.id == uid)
-            .options(selectinload(DBSession.mitre_mappings))
-        )
-        s = result.scalar_one_or_none()
-        if s is None:
-            raise HTTPException(status_code=404, detail="Session not found")
-
-        # Get live data if active
-        live_sessions = {str(x.session_id): x for x in await session_manager.all_sessions()}
-        live = live_sessions.get(session_id)
-
-        # Calculate duration
-        start = s.start_time or datetime.now(timezone.utc)
-        end = s.end_time or datetime.now(timezone.utc)
-        duration_seconds = (end - start).total_seconds()
-        minutes = int(duration_seconds // 60)
-        seconds = int(duration_seconds % 60)
-
-        # MITRE techniques from mappings
-        mitre_techniques = [
-            {
-                "technique_id": m.technique_id,
-                "technique_name": m.technique_name,
-                "tactic": m.tactic,
-                "confidence": m.confidence or 0.0,
-            }
-            for m in s.mitre_mappings
-        ]
-
-        return {
-            "session_id": session_id,
-            "primary_objective": s.primary_objective or "unknown",
-            "attacker_type": s.attacker_type or "unknown",
-            "threat_level": live.threat_level if live else s.threat_level or "LOW",
-            "commands_executed": len(s.commands) if s.commands else (live.command_count if live else 0),
-            "session_duration": f"{minutes}m {seconds}s",
-            "mitre_techniques": mitre_techniques,
-            "confidence": live.confidence if live else 0.0,
-        }
-
-    @router.get("/attack-summary/{session_id}")
-    async def get_attack_summary(
-        session_id: str,
-        db: AsyncSession = Depends(get_db_session),
-    ) -> dict[str, str]:
-        """Attack narrative and summary for frontend."""
-        try:
-            uid = uuid.UUID(session_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid session ID")
-
-        result = await db.execute(
-            select(DBSession)
-            .where(DBSession.id == uid)
-            .options(selectinload(DBSession.mitre_mappings))
-        )
-        s = result.scalar_one_or_none()
-        if s is None:
-            raise HTTPException(status_code=404, detail="Session not found")
-
-        summary = _generate_attack_narrative(s)
-        return {"summary": summary}
-
-    @router.get("/logs/{session_id}")
-    async def get_session_logs_v2(
-        session_id: str,
-        event_type: str = "all",
-        limit: int = 500,
-        db: AsyncSession = Depends(get_db_session),
-    ) -> dict[str, Any]:
-        """Get session logs (events) in frontend-compatible format."""
-        try:
-            uid = uuid.UUID(session_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid session ID")
-
-        result = await db.execute(
-            select(DBSession)
-            .where(DBSession.id == uid)
-            .options(selectinload(DBSession.commands))
-        )
-        s = result.scalar_one_or_none()
-        if s is None:
-            raise HTTPException(status_code=404, detail="Session not found")
-
-        # Get live events if session is active
-        live_sessions = {str(x.session_id): x for x in await session_manager.all_sessions()}
-        live = live_sessions.get(session_id)
-
-        logs = []
-
-        # Add commands as logs
-        if event_type in ["all", "commands"]:
-            for cmd in sorted(s.commands, key=lambda c: c.timestamp) if s.commands else []:
-                logs.append({
-                    "timestamp": cmd.timestamp.isoformat() if cmd.timestamp else None,
-                    "event_type": "command",
-                    "details": cmd.command_text or "unknown",
-                })
-
-        # Add live session info if available
-        if live and event_type in ["all", "system"]:
-            logs.append({
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "event_type": "system",
-                "details": f"Session active from {s.source_ip} as {s.username}",
-            })
-
-        # Limit and sort
-        logs = sorted(logs, key=lambda x: x["timestamp"], reverse=True)[:limit]
-
-        return {
-            "session_id": session_id,
-            "total_logs": len(logs),
-            "filters_available": ["all", "commands", "system"],
             "current_filter": event_type,
             "logs": logs,
         }

@@ -5,6 +5,7 @@ Security event logging for compliance and forensics.
 from typing import List, Dict, Optional
 from datetime import datetime, timezone
 from pathlib import Path
+import asyncio
 import json
 
 import structlog
