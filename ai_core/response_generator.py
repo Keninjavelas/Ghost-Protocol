@@ -107,7 +107,7 @@ class ResponseGenerator:
         
         # Parse flags and path
         flags = ""
-        path = None
+        path = ""  # Default to current directory
         long_format = False
         
         for part in parts[1:]:
@@ -360,71 +360,57 @@ lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
     ) -> str:
         """
         Generate a directory listing for ls command.
-        Provides fallback behavior if bait_files functions fail.
+        Uses bait_files module for consistent corporate filesystem.
         """
+        # Normalize directory path
+        if target_dir == "~":
+            target_dir = "/root"
+        elif not target_dir.startswith("/"):
+            # Relative path - resolve from working directory
+            base = session_state.working_directory.rstrip("/")
+            target_dir = f"{base}/{target_dir}".replace("//", "/")
+        
         try:
-            # Try to use the bait_files function
+            # Use bait_files function for consistent output
             listing = format_directory_listing(target_dir, long_format)
             if listing:
                 return listing
-        except Exception as exc:
-            log.debug(f"format_directory_listing failed: {exc}")
-        
-        # Fallback: generate basic listing from session_state.fake_fs
-        entries = []
-        for path, metadata in session_state.fake_fs.items():
-            # Check if this file is in the target directory
-            if path.startswith(target_dir.rstrip("/")):
-                # Extract just the filename
-                rel_path = path[len(target_dir.rstrip("")):]
-                if rel_path.startswith("/"):
-                    rel_path = rel_path[1:]
-                
-                # Only include direct children (not nested)
-                if "/" not in rel_path and rel_path:
-                    if long_format:
-                        # Long format: permissions owner size timestamp name
-                        content_hint = metadata.get("content_hint", "")
-                        size = len(content_hint.encode())
-                        is_dir = metadata.get("is_directory", False)
-                        permissions = "drwxr-xr-x" if is_dir else "-rw-r--r--"
-                        entries.append(f"{permissions} 1 root root {size:>6} Mar  6 10:15 {rel_path}")
-                    else:
-                        # Short format: just names
-                        entries.append(rel_path)
-        
-        # If no entries found, check if directory exists
-        if not entries:
+            
+            # Empty directory or doesn't exist
             if is_directory(target_dir):
                 return ""  # Empty directory
             else:
                 return f"ls: cannot access '{target_dir}': No such file or directory"
         
-        # Format output
-        if long_format:
-            return "\n".join(entries)
-        else:
-            # Column format for short listing
-            return "  ".join(entries) if entries else ""
+        except Exception as exc:
+            log.warning(
+                "directory_listing_error",
+                session_id=str(session_state.session_id),
+                directory=target_dir,
+                error=str(exc),
+            )
+            return f"ls: cannot access '{target_dir}': No such file or directory"
 
     def _read_file_content(self, file_path: str, session_state: "SessionState") -> str | None:
         """
-        Read file content from bait_files or session_state.fake_fs.
+        Read file content from bait_files.
         Returns None if file not found.
         """
-        # Try bait_files function first
+        # Normalize path
+        if file_path == "~":
+            file_path = "/root"
+        elif not file_path.startswith("/"):
+            # Relative path - resolve from working directory
+            base = session_state.working_directory.rstrip("/")
+            file_path = f"{base}/{file_path}".replace("//", "/")
+        
+        # Try bait_files function
         try:
             content = get_bait_content(file_path)
             if content:
                 return content
         except Exception as exc:
             log.debug(f"get_bait_content failed for {file_path}: {exc}")
-        
-        # Fallback: check session_state.fake_fs
-        if file_path in session_state.fake_fs:
-            metadata = session_state.fake_fs[file_path]
-            content = metadata.get("content", metadata.get("content_hint", ""))
-            return content if content else ""
         
         # File not found
         return None

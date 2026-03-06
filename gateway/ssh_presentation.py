@@ -127,10 +127,11 @@ def handle_builtin_command(
         None if the command should be routed to the AI pipeline.
     
     Supported commands:
-      - whoami: returns 'root'
-      - hostname: returns the honeypot hostname
-      - pwd: returns working directory
-      - uname -a: returns kernel info
+      - whoami, hostname, pwd, id
+      - uname (all variants)
+      - ip a / ifconfig
+      - echo, date, uptime
+      - ls, dir (basic listing)
     """
     cmd = command.strip().lower()
     
@@ -146,11 +147,79 @@ def handle_builtin_command(
     if cmd == "pwd":
         return working_directory
     
-    # uname -a (system info)
-    if cmd == "uname -a":
-        return f"Linux {hostname} 5.15.0-91-generic #101-Ubuntu SMP Tue Nov 14 13:29:11 UTC 2023 x86_64 GNU/Linux"
+    # id - user identity (root)
+    if cmd == "id":
+        return "uid=0(root) gid=0(root) groups=0(root)"
     
-    # Not a built-in command
+    # uname - system information (Ubuntu kernel)
+    if cmd.startswith("uname"):
+        if cmd == "uname" or cmd == "uname -s":
+            return "Linux"
+        elif cmd == "uname -r":
+            return "5.15.0-91-generic"
+        elif cmd == "uname -n":
+            return hostname
+        elif cmd == "uname -m":
+            return "x86_64"
+        elif cmd == "uname -o":
+            return "GNU/Linux"
+        else:
+            # uname -a (all info)
+            return f"Linux {hostname} 5.15.0-91-generic #101-Ubuntu SMP Tue Nov 14 13:30:08 UTC 2023 x86_64 x86_64 x86_64 GNU/Linux"
+    
+    # ip a / ip addr - network interface info
+    if cmd in ["ip a", "ip addr", "ip address", "ip address show", "ip a show"]:
+        return """1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 9001 qdisc fq_codel state UP group default qlen 1000
+    link/ether 02:42:ac:11:00:02 brd ff:ff:ff:ff:ff:ff
+    inet 10.0.4.12/24 brd 10.0.4.255 scope global dynamic eth0
+       valid_lft 3467sec preferred_lft 3467sec
+    inet6 fe80::42:acff:fe11:2/64 scope link 
+       valid_lft forever preferred_lft forever"""
+    
+    # ifconfig - network interface info (legacy)
+    if cmd == "ifconfig":
+        return """eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 9001
+        inet 10.0.4.12  netmask 255.255.255.0  broadcast 10.0.4.255
+        inet6 fe80::42:acff:fe11:2  prefixlen 64  scopeid 0x20<link>
+        ether 02:42:ac:11:00:02  txqueuelen 1000  (Ethernet)
+        RX packets 1245  bytes 156324 (156.3 KB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 987  bytes 98765 (98.7 KB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
+        inet 127.0.0.1  netmask 255.0.0.0
+        inet6 ::1  prefixlen 128  scopeid 0x10<host>
+        loop  txqueuelen 1000  (Local Loopback)
+        RX packets 0  bytes 0 (0.0 B)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 0  bytes 0 (0.0 B)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0"""
+    
+    # echo - print arguments
+    if cmd.startswith("echo"):
+        text = command[5:].strip() if len(command) > 5 else ""
+        if text.startswith('"') and text.endswith('"'):
+            text = text[1:-1]
+        elif text.startswith("'") and text.endswith("'"):
+            text = text[1:-1]
+        return text
+    
+    # date - current date/time
+    if cmd == "date":
+        return "Thu Mar  6 14:23:15 UTC 2026"
+    
+    # uptime - system uptime
+    if cmd == "uptime":
+        return " 14:23:15 up 7 days, 3:42,  1 user,  load average: 0.08, 0.12, 0.09"
+    
+    # Not a built-in command - let response generator handle ls, dir, cat, etc.
     return None
 
 

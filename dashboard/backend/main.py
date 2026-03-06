@@ -108,9 +108,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Validate Service Health ───────────────────────────────────────────
     # Database health check
     try:
+        from sqlalchemy import text
         from database.db import get_session
         async with get_session() as db:
-            await db.execute("SELECT 1")
+            await db.execute(text("SELECT 1"))
         log.info("database_health_check_passed")
     except Exception as e:
         log.critical("database_health_check_failed", error=str(e))
@@ -199,9 +200,10 @@ def create_app() -> FastAPI:
         
         # Check database
         try:
+            from sqlalchemy import text
             from database.db import get_session
             async with get_session() as db:
-                await db.execute("SELECT 1")
+                await db.execute(text("SELECT 1"))
             health_status["services"]["database"] = "ok"
         except Exception as e:
             health_status["services"]["database"] = f"error: {str(e)[:100]}"
